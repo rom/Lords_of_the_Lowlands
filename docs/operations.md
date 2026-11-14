@@ -2,7 +2,7 @@
 
 ## Build
 
-Requirements: Go 1.24 (see `go.mod`). No C toolchain, Node or other tools
+Requirements: Go 1.25 or newer (see `go.mod`). No C toolchain, Node or other tools
 are needed — the web client is embedded with `go:embed`.
 
 ```sh

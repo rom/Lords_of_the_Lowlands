@@ -85,7 +85,7 @@ effect and piece of music is generated procedurally at runtime.
 
 ## Quick start
 
-Requirements: Go 1.24+ on Linux (the sandbox is Linux-only; the game runs elsewhere with `-no-sandbox`).
+Requirements: Go 1.25+ on Linux (the sandbox is Linux-only; the game runs elsewhere with `-no-sandbox`).
 
 ```bash
 make build
@@ -182,7 +182,7 @@ make race          # race detector on the server
 make long          # hour-long AI-vs-AI matches across ages
 ```
 
-Current coverage: **92.3 %** of statements across all packages (`make cover`).
+Current coverage: **92.8 %** of statements across all packages (`make cover`).
 
 Fuzz targets: `FuzzParseClientMsg`, `FuzzHTTPAPI` (server), `FuzzLevelJSON`, `FuzzApply`, `FuzzFog`,
 `FuzzCleanText`, `FuzzLoadGame` (game), `FuzzOpenCorruptFiles`, `FuzzValidName` (store).

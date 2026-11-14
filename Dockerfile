@@ -10,7 +10,7 @@
 # sandbox) and serves the embedded web client; the runtime image contains
 # nothing but the binary, CA roots and /etc/passwd entries of distroless.
 
-ARG GO_VERSION=1.24.7
+ARG GO_VERSION=1.25.0
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src

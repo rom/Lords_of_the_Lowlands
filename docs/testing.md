@@ -71,7 +71,7 @@ Target: **≥ 80 % of statements** across all packages, measured with
 for the package that owns it. `make cover` prints the total and fails the
 build below the threshold.
 
-Current result: **92.3 %** of statements (`make cover`, total line).
+Current result: **92.8 %** of statements (`make cover`, total line).
 
 ## Fuzzing
 
