@@ -78,6 +78,10 @@ effect and piece of music is generated procedurally at runtime.
 | *Interstellar Age: void marines and starfighters* | *The level editor* |
 | ![Lobby](docs/screenshots/lobby.png) | ![Room](docs/screenshots/room.png) |
 | *Multiplayer lobby with global chat* | *A battle room: humans and AI, teams and seats* |
+| ![Administration](docs/screenshots/admin.png) | ![Health & performance](docs/screenshots/admin-stats.png) |
+| *Administration: approve, block, roles, MFA, passwords* | *Live health and performance dashboard* |
+| ![Demo mode](docs/screenshots/demo.png) | |
+| *Demo mode: the game plays itself when nobody is at the keyboard* | |
 
 ## Quick start
 
