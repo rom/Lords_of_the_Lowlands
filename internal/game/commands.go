@@ -397,6 +397,7 @@ func (g *Game) orderMove(u *Entity, x, y float64, amove bool) {
 	u.Path = nil
 	u.repathAt = 0
 	u.stuck = 0
+	u.progTick = 0
 }
 
 func (g *Game) orderGather(u *Entity, t *Entity) {

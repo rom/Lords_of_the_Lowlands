@@ -178,3 +178,26 @@ func TestPlayerFishing(t *testing.T) {
 		t.Fatal("boat on land target moves")
 	}
 }
+
+func TestMoveWatchdog(t *testing.T) {
+	g := newGame(t, flatLevel(), false)
+	ws := own(g, 0, ClassWorker)
+	// everyone to the same spot: the crowd must settle, not shuffle forever
+	for _, w := range ws {
+		g.orderMove(w, 15.5, 15.5, false)
+	}
+	steps(g, 400)
+	for _, w := range ws {
+		if w.Order != OIdle {
+			t.Fatalf("worker still moving at %.2f,%.2f", w.X, w.Y)
+		}
+	}
+	// a unit that cannot make progress gives up
+	u := ws[0]
+	g.orderMove(u, 25, 25, false)
+	u.U = &UnitDef{Speed: 0, Class: ClassWorker} // frozen
+	steps(g, 40)
+	if u.Order != OIdle {
+		t.Fatal("frozen unit should stop")
+	}
+}

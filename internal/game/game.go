@@ -75,6 +75,9 @@ type Entity struct {
 	scanAt    int
 	pathGoal  rect
 	chaseFail int
+	progTick  int     // move watchdog: tick of the last progress check
+	progX     float64 // position at that check
+	progY     float64
 	stuck     int
 
 	// buildings
@@ -973,12 +976,31 @@ func (g *Game) approach(u, t *Entity) {
 // reach is the work distance from a unit to a resource or building edge.
 const reach = 1.25
 
+// noProgress is a watchdog for move orders: a unit that has reached the
+// crowd around its destination, or keeps shuffling in place (blocked or
+// jostled), stops instead of trying forever. Over every 3 s window the unit
+// must get at least 0.4 tiles away from where the window started.
+func (g *Game) noProgress(u *Entity) bool {
+	if math.Hypot(u.TX-u.X, u.TY-u.Y) < 0.6 && len(u.Path) <= 1 {
+		return true // close enough: crowded destinations are shared
+	}
+	if u.progTick == 0 || g.Tick-u.progTick > 30 {
+		u.progTick, u.progX, u.progY = g.Tick, u.X, u.Y
+		return false
+	}
+	if g.Tick-u.progTick == 30 && math.Hypot(u.X-u.progX, u.Y-u.progY) < 0.4 {
+		return true
+	}
+	return false
+}
+
 func (g *Game) setIdle(u *Entity) {
 	u.Order = OIdle
 	u.Path = nil
 	u.Target = 0
 	u.Busy = false
 	u.stuck = 0
+	u.progTick = 0
 }
 
 func (g *Game) stepUnit(u *Entity) {
@@ -996,7 +1018,7 @@ func (g *Game) stepUnit(u *Entity) {
 			}
 		}
 	case OMove:
-		if g.moveTowards(u, rect{int(u.TX), int(u.TY), int(u.TX), int(u.TY)}, u.TX, u.TY, 1) {
+		if g.moveTowards(u, rect{int(u.TX), int(u.TY), int(u.TX), int(u.TY)}, u.TX, u.TY, 1) || g.noProgress(u) {
 			g.setIdle(u)
 		}
 	case OAttackMove:
@@ -1015,7 +1037,7 @@ func (g *Game) stepUnit(u *Entity) {
 			u.Target = 0
 			u.Path = nil
 		}
-		if g.moveTowards(u, rect{int(u.TX), int(u.TY), int(u.TX), int(u.TY)}, u.TX, u.TY, 1) {
+		if g.moveTowards(u, rect{int(u.TX), int(u.TY), int(u.TX), int(u.TY)}, u.TX, u.TY, 1) || g.noProgress(u) {
 			g.setIdle(u)
 		}
 	case OAttack:
