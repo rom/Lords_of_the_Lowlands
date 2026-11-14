@@ -1,11 +1,11 @@
 // Level editor: paint terrain, place resources/animals and start positions,
 // edit level properties, save to the server or download as JSON.
-import { el, $, api, clamp, TEAM } from './util.js';
+import { el, $, api, clamp, TEAM, DIFFICULTIES, MAP_TYPES } from './util.js';
 import { Renderer } from './render.js';
 import { theme, iconCanvas, resourceSprite } from './sprites.js';
 
 const TERRAIN = ['Grass', 'Dirt', 'Sand', 'Water', 'Mountain', 'Ford', 'Road'];
-const OBJECTS = ['tree', 'berry', 'gold', 'stone', 'crystal', 'deer', 'boar', 'mammoth'];
+const OBJECTS = ['tree', 'berry', 'gold', 'stone', 'crystal', 'fish', 'deer', 'boar', 'mammoth'];
 const THEMES = ['temperate', 'desert', 'winter', 'tropical', 'moon', 'mars', 'space'];
 const MIN = 24, MAX = 128;
 
@@ -35,7 +35,7 @@ class Editor {
 
   newLevel(w, h, th) {
     this.lv = { id: '', name: 'New Level', description: '', theme: th, width: w, height: h, startAge: 0, maxAge: 3,
-      objective: { type: 'conquest' }, startRes: [200, 200, 150, 0, 0], difficulty: 'normal', tiles: '0'.repeat(w * h), objects: [],
+      objective: { type: 'conquest' }, startRes: [200, 200, 150, 0, 0], difficulty: 'normal', mapType: 'inland', tiles: '0'.repeat(w * h), objects: [],
       starts: [{ x: 8, y: 8 }, { x: w - 9, y: h - 9 }] };
     this.load();
   }
@@ -120,6 +120,8 @@ class Editor {
     $('#pstart').replaceChildren(...ages.map(o => o.cloneNode(true)));
     $('#pmax').replaceChildren(...ages);
     $('#ptheme').replaceChildren(...THEMES.map(t => el('option', { value: t, text: t })));
+    $('#pmaptype').replaceChildren(...MAP_TYPES.map(([v, t]) => el('option', { value: v, text: t })));
+    $('#pdiff').replaceChildren(...DIFFICULTIES.map(([v, t]) => el('option', { value: v, text: t })));
     const upd = () => {
       const l = this.lv;
       l.name = $('#pname').value; l.description = $('#pdesc').value;
@@ -128,6 +130,7 @@ class Editor {
       l.objective = { type: $('#pobj').value };
       if (l.objective.type === 'survive') l.objective.minutes = +$('#pmin').value;
       l.difficulty = $('#pdiff').value;
+      l.mapType = $('#pmaptype').value;
       $('#pminrow').classList.toggle('hidden', l.objective.type !== 'survive');
       if (th !== l.theme) {
         l.theme = th;
@@ -137,7 +140,7 @@ class Editor {
       }
       this.check();
     };
-    for (const id of ['pname', 'pdesc', 'ptheme', 'pstart', 'pmax', 'pobj', 'pmin', 'pdiff', 'r0', 'r1', 'r2', 'r3', 'r4']) $('#' + id).addEventListener('input', upd);
+    for (const id of ['pname', 'pdesc', 'ptheme', 'pstart', 'pmax', 'pobj', 'pmin', 'pdiff', 'pmaptype', 'r0', 'r1', 'r2', 'r3', 'r4']) $('#' + id).addEventListener('input', upd);
     $('#enew').addEventListener('click', () => this.newDialog());
     $('#egen').addEventListener('click', () => this.generate());
     $('#eopen').addEventListener('change', (e) => { if (e.target.value) this.open(e.target.value); e.target.value = ''; });
@@ -156,6 +159,7 @@ class Editor {
     $('#pobj').value = (l.objective && l.objective.type) || 'conquest'; $('#pmin').value = (l.objective && l.objective.minutes) || 15;
     $('#pminrow').classList.toggle('hidden', $('#pobj').value !== 'survive');
     $('#pdiff').value = l.difficulty || 'normal';
+    $('#pmaptype').value = l.mapType || 'inland';
     const sr = l.startRes || [0, 0, 0, 0, 0];
     for (let i = 0; i < 5; i++) $('#r' + i).value = sr[i] || 0;
     this.buildTools();
@@ -275,10 +279,10 @@ class Editor {
       const i = y * w + x;
       if (t.kind === 'terrain') {
         if (this.tiles[i] !== t.v) { this.tiles[i] = t.v; this.r.setTile(x, y, t.v); changed = true; }
-        if ((t.v === 3 || t.v === 4) && this.objects.has(i)) { this.objects.delete(i); }
+        if (this.objects.has(i) && ((t.v === 3 || t.v === 4) !== (this.objects.get(i) === 'fish') || t.v === 4)) { this.objects.delete(i); }
       } else if (t.kind === 'object') {
         const tt = this.tiles[i];
-        if (tt === 3 || tt === 4) continue;
+        if (t.v === 'fish' ? tt !== 3 : tt === 3 || tt === 4) continue; // fish live in water, everything else on land
         if (r > 0 && t.v !== 'tree' && Math.random() > 0.35) continue; // scatter
         if (r > 0 && t.v === 'tree' && Math.random() > 0.7) continue;
         if (this.objects.get(i) !== t.v) { this.objects.set(i, t.v); changed = true; }

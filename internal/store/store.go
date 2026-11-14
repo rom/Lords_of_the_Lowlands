@@ -67,7 +67,7 @@ type User struct {
 	Wins      int       `json:"wins"`
 	Losses    int       `json:"losses"`
 	BestScore int       `json:"bestScore"`
-	Campaign  int       `json:"campaign"` // highest campaign level completed
+	Campaign  int       `json:"campaign"`         // highest campaign level completed
 	Role      string    `json:"role,omitempty"`   // "user" or "admin"
 	Status    string    `json:"status,omitempty"` // active, pending, blocked
 	// TOTP multi-factor authentication.

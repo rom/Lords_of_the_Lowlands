@@ -941,7 +941,10 @@ export function torch(ctx, x, y, z = 0, h = 0.4) {
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b[0], b[1] - 2, 6, 0, 7); ctx.fill();
 }
 // ground patch under a building
+let GROUND = null;
+export function setGround(c) { GROUND = c; }
 export function groundPatch(ctx, x0, y0, x1, y1, col, mat = 'earth', soft = true) {
+  if (GROUND) ctx = GROUND;
   ctx.save();
   if (soft && 'filter' in ctx) ctx.filter = 'blur(1.5px)';
   const f = topF(x0, y0, x1, y1, 0);

@@ -288,7 +288,9 @@ func (s *Store) readSave(owner, id string, withGame bool) (SaveMeta, []byte, err
 }
 
 // LoadSave returns a saved game owned by owner.
-func (s *Store) LoadSave(owner, id string) (SaveMeta, []byte, error) { return s.readSave(owner, id, true) }
+func (s *Store) LoadSave(owner, id string) (SaveMeta, []byte, error) {
+	return s.readSave(owner, id, true)
+}
 
 // DeleteSave removes a saved game.
 func (s *Store) DeleteSave(owner, id string) error {

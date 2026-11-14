@@ -162,7 +162,7 @@ func (s *Server) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 	d := s.set.Game.Demo
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"registration": a.Registration, "allowGuests": a.AllowGuests, "minPasswordLength": a.MinPasswordLength,
-		"demo": map[string]interface{}{"enabled": d.Enabled, "idleMinutes": d.IdleMinutes, "rotateMinutes": d.RotateMinutes},
+		"demo":           map[string]interface{}{"enabled": d.Enabled, "idleMinutes": d.IdleMinutes, "rotateMinutes": d.RotateMinutes},
 		"signedCommands": s.set.AntiCheat.Enabled && s.set.AntiCheat.SignedCmds,
 	})
 }

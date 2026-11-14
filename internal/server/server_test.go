@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/rom/lords_of_the_lowlands/internal/config"
 	"github.com/rom/lords_of_the_lowlands/internal/game"
 	"github.com/rom/lords_of_the_lowlands/internal/store"
 )
@@ -29,14 +30,20 @@ type env struct {
 	st  *store.Store
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+func newEnvWith(t *testing.T, mod func(c *config.Config)) *env {
 	t.Helper()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	set := config.Default()
+	if mod != nil {
+		mod(set)
+	}
 	static := fstest.MapFS{"index.html": {Data: []byte("<h1>hi</h1>")}, "js/main.js": {Data: []byte("console.log(1)")}}
-	s, err := New(Config{Static: static, Store: st, AllowedOrigins: []string{"game.example"}})
+	s, err := New(Config{Static: static, Store: st, AllowedOrigins: []string{"game.example"}, Settings: set})
 	if err != nil {
 		t.Fatal(err)
 	}

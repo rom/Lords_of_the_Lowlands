@@ -1,6 +1,9 @@
 // Procedural art: terrain palettes, buildings, resources, units and icons.
 // Everything is drawn with canvas paths so no image assets are needed.
 import { TW, TH, ZH, TEAM, hexToRgb, shade, mix, rgb, hash2 } from './util.js';
+import { recStart, recStop, castShadows, setGround, lightOf } from './art/kit.js';
+import { drawShip } from './art/naval.js';
+import { drawBuildingBody, drawConstruction, drawAnim, hasAnim } from './art/buildings.js';
 
 // ---------------------------------------------------------------- palettes
 // terrain: grass, dirt, sand, water, mountain, shallow, road
@@ -125,341 +128,85 @@ export function winR(ctx, x1, y0, u, v, w, h, col) {
   ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
 }
 
-function flag(ctx, x, y, z, h, team, t = 0) {
-  const [bx, by] = P(x, y, z);
-  ctx.strokeStyle = '#3a2c1c'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by - h * ZH); ctx.stroke();
-  const w = Math.sin(t * 4 + x) * 2;
-  ctx.fillStyle = TEAM[team] || '#888';
-  ctx.beginPath(); ctx.moveTo(bx, by - h * ZH); ctx.quadraticCurveTo(bx + 7, by - h * ZH + 1 + w, bx + 13, by - h * ZH + 3);
-  ctx.lineTo(bx + 13, by - h * ZH + 10); ctx.quadraticCurveTo(bx + 7, by - h * ZH + 8 + w, bx, by - h * ZH + 8); ctx.closePath(); ctx.fill();
-}
-
 function groundShadow(ctx, s, k = 0.25) {
   ctx.fillStyle = `rgba(0,0,0,${k})`;
   face(ctx, [[0.15, 0.25, 0], [s + 0.45, 0.25, 0], [s + 0.45, s + 0.35, 0], [0.15, s + 0.35, 0]], ctx.fillStyle);
 }
 
 // ------------------------------------------------------------- buildings
-// Era style palettes.
-const ERA = {
-  stone: { wall: '#7a5a3a', roof: '#8d6c45', trim: '#4a3520', stone: '#8f8a80' },
-  bronze: { wall: '#c9a676', roof: '#a8865a', trim: '#7a5a34', stone: '#b9a27e' },
-  iron: { wall: '#7b5b3b', roof: '#b39556', trim: '#4b3620', stone: '#8d8678' },
-  classical: { wall: '#e9e2d0', roof: '#b4553a', trim: '#cfc4a8', stone: '#d8d0bc' },
-  medieval: { wall: '#9d978c', roof: '#7a3b2b', trim: '#5a3a24', stone: '#8c877d' },
-  gunpowder: { wall: '#a8553c', roof: '#4c5560', trim: '#e0d8c8', stone: '#9e978b' },
-  industrial: { wall: '#8e4434', roof: '#3e3e44', trim: '#c8b89a', stone: '#7a7674' },
-  modern: { wall: '#b9bcc0', roof: '#5d6266', trim: '#3f86c6', stone: '#9ea2a6' },
-  future: { wall: '#dfe6ee', roof: '#8fa2b8', trim: '#39d4ff', stone: '#c5ccd6' },
-  space: { wall: '#8792a3', roof: '#4c5666', trim: '#7cf1ff', stone: '#6f7a8a' },
-};
-
+// Buildings are drawn by ./art/buildings.js with textured, lit planes, in
+// three layers (ground patch, soft cast shadows, body) and cached at 2x.
 const bcache = new Map();
+let scratch = null;
+function layer(w, h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; return c;
+}
 
 // Returns a cached canvas for a building and its anchor (screen offset of
-// the footprint's top tile corner).
-export function buildingSprite(type, era, team, size, stage) {
-  const key = `${type}|${era}|${team}|${stage}`;
+// the footprint's top corner). live=true leaves out parts that
+// drawBuildingAnim animates (windmill sails, glows) so they can be drawn live.
+export function buildingSprite(type, era, team, size, stage, live = false) {
+  const key = `${type}|${era}|${team}|${size}|${stage}|${live && hasAnim(type, era) ? 1 : 0}`;
   let c = bcache.get(key);
   if (c) return c;
-  const w = size * TW + 40, h = size * TH + 190;
-  const cv = document.createElement('canvas');
-  cv.width = w * 2; cv.height = h * 2;
+  const padL = 44, padR = 140, top = 210, bottom = 24 + (type === 'dock' ? 56 : 0);
+  const w = size * TW + padL + padR, h = size * TH + top + bottom;
+  const ox = size * TW / 2 + padL, oy = top;
+  const W2 = w * 2, H2 = h * 2;
+  const cv = layer(W2, H2);
+  if (!scratch || scratch.g.width < W2 || scratch.g.height < H2) scratch = { g: layer(W2, H2), b: layer(W2, H2) };
+  const gctx = scratch.g.getContext('2d'), bctx = scratch.b.getContext('2d');
+  for (const c2 of [gctx, bctx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, W2, H2); c2.setTransform(2, 0, 0, 2, ox * 2, oy * 2); }
+  setGround(gctx); recStart();
+  try {
+    if (stage < 3) drawConstruction(bctx, type, era, size, stage);
+    else drawBuildingBody(bctx, type, era, team, size, 0, live);
+  } finally { setGround(null); }
+  const vols = recStop();
   const ctx = cv.getContext('2d');
-  ctx.scale(2, 2);
-  // origin: footprint top corner at (w/2, 170)
-  ctx.translate(w / 2, 170);
-  if (stage < 3) drawFoundation(ctx, size, stage, era);
-  else drawBuilding(ctx, type, era, team, size, 0);
-  c = { canvas: cv, ox: w / 2, oy: 170, w, h };
+  ctx.drawImage(scratch.g, 0, 0, W2, H2, 0, 0, W2, H2);
+  ctx.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
+  castShadows(ctx, vols, type === 'farm' ? 0.2 : 0.36);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(scratch.b, 0, 0, W2, H2, 0, 0, W2, H2);
+  c = { canvas: cv, ox, oy, w, h };
   bcache.set(key, c);
   return c;
 }
 
-function drawFoundation(ctx, s, stage, era) {
-  const e = ERA[era] || ERA.medieval;
-  face(ctx, [[0, 0, 0], [s, 0, 0], [s, s, 0], [0, s, 0]], 'rgba(120,96,64,0.75)');
-  ctx.strokeStyle = 'rgba(60,40,20,0.6)';
-  for (let i = 0; i <= s; i++) {
-    let [a, b] = [P(i, 0), P(i, s)]; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-    [a, b] = [P(0, i), P(s, i)]; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-  }
-  if (stage >= 1) box(ctx, 0.15, 0.15, s - 0.15, s - 0.15, 0, 0.25 + stage * 0.25, e.stone, { noTop: false });
-  // scaffolding poles
-  ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 2;
-  const hz = 0.6 + stage * 0.5;
-  for (const [x, y] of [[0.1, s - 0.1], [s - 0.1, s - 0.1], [s - 0.1, 0.1], [s / 2, s - 0.1], [s - 0.1, s / 2]]) {
-    const a = P(x, y, 0), b = P(x, y, hz); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-  }
-  ctx.lineWidth = 1.2;
-  for (const z of [hz * 0.5, hz]) {
-    const pts = [P(0.1, s - 0.1, z), P(s - 0.1, s - 0.1, z), P(s - 0.1, 0.1, z)];
-    ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[1]); ctx.lineTo(...pts[2]); ctx.stroke();
-  }
-}
+// true when drawBuildingAnim has something to animate for this building
+export function buildingAnimated(type, era) { return hasAnim(type, era); }
+// Draws the live (animated) overlay of a building; origin = footprint top corner.
+export function drawBuildingAnim(ctx, type, era, team, s, t) { if (hasAnim(type, era)) drawAnim(ctx, type, era, team, s, t); }
 
 // Draws a finished building into ctx with origin at the footprint top corner.
 export function drawBuilding(ctx, type, era, team, s, t) {
-  const e = ERA[era] || ERA.medieval;
-  const tc = TEAM[team] || '#888';
-  const m = 0.12;
-  const x0 = m, y0 = m, x1 = s - m, y1 = s - m;
-  groundShadow(ctx, s);
-  const prim = era === 'stone';
-  const ancient = era === 'bronze' || era === 'iron';
-  const futur = era === 'future' || era === 'space';
-  const dark = 'rgba(25,18,12,0.85)';
-  const glass = futur ? 'rgba(90,230,255,0.9)' : era === 'modern' ? 'rgba(120,180,220,0.9)' : 'rgba(255,210,120,0.85)';
-  switch (type) {
-    case 'town_center': {
-      if (prim) {
-        // big hide tent with poles and a camp fire
-        cone(ctx, s / 2 - 0.2, s / 2 - 0.2, 0, 1.2, 1.9, '#9a7448');
-        ctx.strokeStyle = '#3d2a17'; ctx.lineWidth = 1.5;
-        for (let i = 0; i < 5; i++) {
-          const a = i * 1.3, p = P(s / 2 - 0.2 + Math.cos(a) * 0.25, s / 2 - 0.2 + Math.sin(a) * 0.25, 2.1), q = P(s / 2 - 0.2, s / 2 - 0.2, 1.6);
-          ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke();
-        }
-        winL(ctx, s / 2 - 0.5, s / 2 + 0.8, 0.3, 0, 0.35, 0.5, dark);
-        cone(ctx, 0.6, s - 0.7, 0, 0.45, 0.8, '#86653f');
-        cone(ctx, s - 0.7, 0.6, 0, 0.45, 0.8, '#86653f');
-        // fire pit stones
-        for (let i = 0; i < 8; i++) {
-          const a = i / 8 * 6.28, p = P(s - 0.6 + Math.cos(a) * 0.3, s - 0.6 + Math.sin(a) * 0.3, 0);
-          ctx.fillStyle = '#777'; ctx.beginPath(); ctx.ellipse(p[0], p[1], 2.5, 1.5, 0, 0, 7); ctx.fill();
-        }
-        flag(ctx, 0.4, 0.4, 0, 2.2, team, t);
-      } else if (ancient) {
-        box(ctx, x0, y0, x1, y1, 0, 0.9, e.wall);
-        box(ctx, 0.6, 0.6, s - 0.6, s - 0.6, 0.9, 1.6, e.wall);
-        gable(ctx, 0.6, 0.6, s - 0.6, s - 0.6, 1.6, 0.6, e.roof, true);
-        for (let i = 0; i < 4; i++) winL(ctx, x0, y1, 0.3 + i * 0.65, 0.25, 0.25, 0.4, dark);
-        winR(ctx, x1, y0, 1.1, 0, 0.6, 0.7, dark);
-        flag(ctx, s / 2, s / 2, 2.1, 1, team, t);
-      } else if (era === 'classical') {
-        box(ctx, x0, y0, x1, y1, 0, 0.25, e.stone);
-        box(ctx, 0.4, 0.4, s - 0.3, s - 0.3, 0.25, 1.3, e.wall);
-        for (let i = 0; i < 6; i++) cylinder(ctx, 0.35 + i * 0.47, s - 0.22, 0.25, 1.35, 0.09, '#f4efe2', 8);
-        for (let i = 0; i < 6; i++) cylinder(ctx, s - 0.22, 0.35 + i * 0.47, 0.25, 1.35, 0.09, '#f4efe2', 8);
-        box(ctx, 0.2, 0.2, s - 0.1, s - 0.1, 1.35, 1.5, e.trim);
-        gable(ctx, 0.2, 0.2, s - 0.1, s - 0.1, 1.5, 0.55, e.roof, false, 0);
-        dome(ctx, s / 2, s / 2, 2.0, 0.55, '#c9b98e');
-        flag(ctx, 0.3, 0.3, 1.5, 1.1, team, t);
-      } else if (era === 'medieval') {
-        box(ctx, x0, y0, x1, y1, 0, 1.1, e.wall);
-        for (let i = 0; i < 6; i++) box(ctx, x0 + i * 0.47, y1 - 0.18, x0 + i * 0.47 + 0.25, y1, 1.1, 1.3, e.wall);
-        for (let i = 0; i < 6; i++) box(ctx, x1 - 0.18, y0 + i * 0.47, x1, y0 + i * 0.47 + 0.25, 1.1, 1.3, e.wall);
-        box(ctx, 0.8, 0.8, 2.2, 2.2, 1.1, 2.4, shade(e.wall, 0.95));
-        pyramid(ctx, 0.7, 0.7, 2.3, 2.3, 2.4, 0.9, e.roof);
-        winL(ctx, x0, y1, 1.1, 0, 0.6, 0.75, '#3b2a1a');
-        for (let i = 0; i < 3; i++) winL(ctx, 0.8, 2.2, 0.25 + i * 0.45, 1.6, 0.14, 0.35, dark);
-        flag(ctx, 1.5, 1.5, 3.2, 0.9, team, t);
-      } else if (era === 'gunpowder') {
-        box(ctx, x0, y0, x1, y1, 0, 1.3, e.wall);
-        gable(ctx, x0, y0, x1, y1, 1.3, 0.8, e.roof, true);
-        box(ctx, 1.2, 1.2, 1.8, 1.8, 1.6, 2.6, e.trim);
-        pyramid(ctx, 1.15, 1.15, 1.85, 1.85, 2.6, 0.8, '#3a6f5a');
-        for (let i = 0; i < 5; i++) { winL(ctx, x0, y1, 0.25 + i * 0.55, 0.3, 0.22, 0.4, glass); winL(ctx, x0, y1, 0.25 + i * 0.55, 0.85, 0.22, 0.3, glass); }
-        for (let i = 0; i < 5; i++) winR(ctx, x1, y0, 0.25 + i * 0.55, 0.5, 0.22, 0.45, glass);
-        flag(ctx, 1.5, 1.5, 3.4, 0.8, team, t);
-      } else if (era === 'industrial') {
-        box(ctx, x0, y0, x1, y1, 0, 1.4, e.wall);
-        box(ctx, x0, y0, x1, y1, 1.4, 1.55, e.trim);
-        box(ctx, 1.1, 1.1, 1.9, 1.9, 1.55, 2.6, e.trim);
-        dome(ctx, 1.5, 1.5, 2.6, 0.45, '#6f8f88');
-        for (let r = 0; r < 2; r++) for (let i = 0; i < 6; i++) winL(ctx, x0, y1, 0.2 + i * 0.46, 0.25 + r * 0.6, 0.2, 0.38, glass);
-        for (let r = 0; r < 2; r++) for (let i = 0; i < 6; i++) winR(ctx, x1, y0, 0.2 + i * 0.46, 0.25 + r * 0.6, 0.2, 0.38, glass);
-        flag(ctx, 1.5, 1.5, 3.5, 0.7, team, t);
-      } else if (era === 'modern') {
-        box(ctx, x0, y0, x1, y1, 0, 0.8, e.wall);
-        box(ctx, 0.5, 0.5, 2.0, 2.0, 0.8, 3.2, '#9fb6c8');
-        for (let r = 0; r < 7; r++) { winL(ctx, 0.5, 2.0, 0.08, 0.95 + r * 0.32, 1.34, 0.18, glass); winR(ctx, 2.0, 0.5, 0.08, 0.95 + r * 0.32, 1.34, 0.18, glass); }
-        ctx.strokeStyle = '#ccc'; const a = P(1.25, 1.25, 3.2), b = P(1.25, 1.25, 4); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-        flag(ctx, 2.6, 2.6, 0.8, 0.9, team, t);
-      } else {
-        // future / space: domed command nexus with glowing ring
-        cylinder(ctx, s / 2, s / 2, 0, 0.5, 1.35, e.wall, 24);
-        dome(ctx, s / 2, s / 2, 0.5, 1.15, era === 'space' ? '#8ea3c0' : '#e6eef6', e.trim);
-        cylinder(ctx, s / 2, s / 2, 1.6, 2.8, 0.18, e.wall, 10);
-        const [gx, gy] = P(s / 2, s / 2, 2.9);
-        const gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, 14); gr.addColorStop(0, '#fff'); gr.addColorStop(0.3, e.trim); gr.addColorStop(1, 'rgba(0,200,255,0)');
-        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(gx, gy, 14, 0, 7); ctx.fill();
-        flag(ctx, 0.4, s - 0.4, 0, 1.4, team, t);
-      }
-      break;
-    }
-    case 'house': {
-      if (prim) {
-        cone(ctx, s / 2, s / 2, 0, 0.75, 1.3, '#8f6b40');
-        winL(ctx, s / 2 - 0.2, s / 2 + 0.65, 0, 0, 0.3, 0.4, dark);
-      } else if (ancient) {
-        box(ctx, x0 + 0.1, y0 + 0.1, x1, y1, 0, 0.7, e.wall);
-        if (era === 'iron') gable(ctx, x0 + 0.1, y0 + 0.1, x1, y1, 0.7, 0.6, e.roof, true);
-        else box(ctx, x0 + 0.05, y0 + 0.05, x1 + 0.05, y1 + 0.05, 0.7, 0.78, e.trim);
-        winL(ctx, x0 + 0.1, y1, 0.5, 0, 0.3, 0.45, dark);
-      } else if (futur) {
-        dome(ctx, s / 2, s / 2, 0, 0.75, e.wall, e.trim);
-      } else if (era === 'modern' || era === 'industrial') {
-        box(ctx, x0, y0, x1, y1, 0, era === 'modern' ? 1.6 : 1.1, e.wall);
-        if (era === 'industrial') gable(ctx, x0, y0, x1, y1, 1.1, 0.4, e.roof, false);
-        for (let r = 0; r < (era === 'modern' ? 4 : 2); r++) { winL(ctx, x0, y1, 0.2, 0.2 + r * 0.36, 0.3, 0.2, glass); winL(ctx, x0, y1, 0.9, 0.2 + r * 0.36, 0.3, 0.2, glass); winR(ctx, x1, y0, 0.2, 0.2 + r * 0.36, 0.3, 0.2, glass); winR(ctx, x1, y0, 0.9, 0.2 + r * 0.36, 0.3, 0.2, glass); }
-      } else {
-        box(ctx, x0 + 0.05, y0 + 0.05, x1, y1, 0, 0.75, e.wall);
-        if (era === 'medieval') {
-          ctx.strokeStyle = e.trim; ctx.lineWidth = 1.5;
-          for (let i = 0; i <= 3; i++) { const a = P(x0 + 0.05 + i * 0.55, y1, 0), b = P(x0 + 0.05 + i * 0.55, y1, 0.75); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
-        }
-        gable(ctx, x0 + 0.05, y0 + 0.05, x1, y1, 0.75, 0.65, e.roof, true);
-        winL(ctx, x0, y1, 0.3, 0, 0.3, 0.5, '#4a2f1a');
-        winR(ctx, x1, y0, 0.6, 0.3, 0.3, 0.25, glass);
-      }
-      // team band
-      face(ctx, [[x0 + 0.2, y1 + 0.02, 0.05], [x0 + 0.5, y1 + 0.02, 0.05], [x0 + 0.5, y1 + 0.02, 0.2], [x0 + 0.2, y1 + 0.02, 0.2]], tc);
-      break;
-    }
-    case 'granary': case 'lumber_camp': case 'mining_camp': {
-      const res = type === 'granary' ? 0 : type === 'lumber_camp' ? 1 : 2;
-      if (prim) {
-        // lean-to shelter with piles
-        face(ctx, [[0.2, 0.3, 0], [1.6, 0.3, 0], [1.6, 0.3, 0.9], [0.2, 0.3, 0.9]], '#6d4c2c');
-        face(ctx, [[0.2, 0.3, 0.9], [1.6, 0.3, 0.9], [1.6, 1.4, 0.2], [0.2, 1.4, 0.2]], '#9a7a4a');
-      } else if (futur) {
-        cylinder(ctx, 0.75, 0.75, 0, 0.9, 0.5, e.wall);
-        dome(ctx, 0.75, 0.75, 0.9, 0.5, e.wall, e.trim);
-        box(ctx, 1.2, 1.1, 1.85, 1.85, 0, 0.35, e.stone);
-      } else {
-        box(ctx, 0.15, 0.15, 1.3, 1.3, 0, 0.75, e.wall);
-        if (type === 'granary' && (era === 'medieval' || era === 'gunpowder')) {
-          cylinder(ctx, 0.75, 0.75, 0.75, 1.3, 0.45, e.wall);
-          cone(ctx, 0.75, 0.75, 1.3, 0.55, 0.6, e.roof);
-          // windmill sails
-          const [mx, my] = P(1.3, 0.75, 1.15);
-          ctx.strokeStyle = '#e9dcc0'; ctx.lineWidth = 2;
-          for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + t * 1.2; ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + Math.cos(a) * 18, my + Math.sin(a) * 18); ctx.stroke(); }
-        } else gable(ctx, 0.15, 0.15, 1.3, 1.3, 0.75, 0.45, e.roof, false);
-        winL(ctx, 0.15, 1.3, 0.35, 0, 0.45, 0.55, dark);
-      }
-      // resource piles
-      if (res === 0) { for (let i = 0; i < 3; i++) { const p = P(1.45 + i * 0.12, 1.55 - i * 0.2, 0); ctx.fillStyle = futur ? '#7ad36a' : '#d8b24a'; ctx.beginPath(); ctx.ellipse(p[0], p[1] - 4, 6, 5, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#8a6a2a'; ctx.stroke(); } }
-      if (res === 1) { for (let i = 0; i < 4; i++) { const p = P(1.4, 1.2 + i * 0.15, 0.05 + (i % 2) * 0.12); ctx.fillStyle = '#7b4f2a'; ctx.beginPath(); ctx.ellipse(p[0], p[1], 9, 3, -0.45, 0, 7); ctx.fill(); ctx.fillStyle = '#d5b07a'; ctx.beginPath(); ctx.ellipse(p[0] + 8, p[1] - 4, 2.5, 2.5, 0, 0, 7); ctx.fill(); } }
-      if (res === 2) { for (let i = 0; i < 5; i++) { const p = P(1.45 + (i % 2) * 0.2, 1.3 + i * 0.1, 0); ctx.fillStyle = i % 2 ? '#e6c24a' : '#9a9a9a'; ctx.beginPath(); ctx.ellipse(p[0], p[1] - 3, 4, 3, 0, 0, 7); ctx.fill(); } }
-      flag(ctx, 0.2, 1.3, 0.75, 0.6, team, t);
-      break;
-    }
-    case 'farm': {
-      const soil = futur ? '#3d5560' : '#6e4e2e';
-      face(ctx, [[0.05, 0.05, 0], [s - 0.05, 0.05, 0], [s - 0.05, s - 0.05, 0], [0.05, s - 0.05, 0]], soil);
-      const crop = futur ? '#6cf08a' : era === 'stone' ? '#7aa03a' : '#c9b347';
-      for (let r = 0; r < 7; r++) {
-        for (let i = 0; i < 9; i++) {
-          const x = 0.25 + r * 0.4, y = 0.2 + i * 0.3;
-          const [px, py] = P(x, y, 0);
-          ctx.fillStyle = shade(crop, 0.8 + hash2(r, i) * 0.4);
-          ctx.beginPath(); ctx.ellipse(px, py - 2, 3, 2.5, 0, 0, 7); ctx.fill();
-        }
-      }
-      if (futur) { box(ctx, 0, 0, s, 0.1, 0, 0.3, '#9ab'); box(ctx, 0, 0, 0.1, s, 0, 0.3, '#9ab'); }
-      else { ctx.strokeStyle = '#5b3d22'; ctx.lineWidth = 1.2; const a = P(0, s), b = P(s, s), c = P(s, 0); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.stroke(); }
-      break;
-    }
-    case 'barracks': case 'range': case 'stable': case 'workshop': case 'academy': {
-      const h = type === 'academy' ? 1.2 : 1.0;
-      if (prim) {
-        // palisade camp with tents
-        ctx.fillStyle = '#6b4a2a';
-        for (let i = 0; i < 12; i++) { const p = P(0.1 + i * 0.24, s - 0.1, 0); ctx.fillRect(p[0] - 1.5, p[1] - 14, 3, 14); }
-        for (let i = 0; i < 12; i++) { const p = P(s - 0.1, 0.1 + i * 0.24, 0); ctx.fillRect(p[0] - 1.5, p[1] - 14, 3, 14); }
-        cone(ctx, 1.0, 1.0, 0, 0.6, 1.1, type === 'academy' ? '#7a5aa0' : '#8f6b40');
-        cone(ctx, 2.0, 1.3, 0, 0.5, 0.9, '#9a7448');
-        if (type === 'range') { const p = P(1.6, 2.2, 0.4); ctx.fillStyle = '#d8c090'; ctx.beginPath(); ctx.arc(p[0], p[1], 6, 0, 7); ctx.fill(); ctx.fillStyle = '#b33'; ctx.beginPath(); ctx.arc(p[0], p[1], 2.5, 0, 7); ctx.fill(); }
-        if (type === 'academy') { const p = P(2.2, 2.2, 0); ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.ellipse(p[0], p[1] - 8, 3, 8, 0, 0, 7); ctx.fill(); }
-      } else if (futur) {
-        box(ctx, x0, y0, x1, y1, 0, 0.6, e.wall);
-        box(ctx, 0.4, 0.4, s - 0.4, s - 0.4, 0.6, 1.1, e.roof);
-        face(ctx, [[x0, y1 + 0.01, 0.2], [x1, y1 + 0.01, 0.2], [x1, y1 + 0.01, 0.28], [x0, y1 + 0.01, 0.28]], e.trim);
-        face(ctx, [[x1 + 0.01, y0, 0.2], [x1 + 0.01, y1, 0.2], [x1 + 0.01, y1, 0.28], [x1 + 0.01, y0, 0.28]], e.trim);
-        if (type === 'stable') { const [px, py] = P(s / 2, s / 2, 1.12); ctx.strokeStyle = e.trim; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(px, py, 22, 11, 0, 0, 7); ctx.stroke(); }
-        if (type === 'academy') dome(ctx, s / 2, s / 2, 1.1, 0.7, '#cfe8ff', e.trim);
-        if (type === 'workshop') { box(ctx, 2.0, 0.3, 2.5, 0.8, 1.1, 2.0, e.stone); }
-        winL(ctx, x0, y1, 0.9, 0, 1.0, 0.5, 'rgba(20,30,40,0.9)');
-      } else {
-        box(ctx, x0, y0, x1, y1, 0, h, e.wall);
-        if (era === 'classical' && type === 'academy') {
-          for (let i = 0; i < 6; i++) cylinder(ctx, 0.35 + i * 0.47, s - 0.22, 0, h + 0.1, 0.08, '#f4efe2', 8);
-          gable(ctx, x0, y0, x1, y1, h + 0.1, 0.5, e.roof, false);
-        } else if (era === 'industrial' || era === 'modern') {
-          // saw-tooth factory roof
-          for (let i = 0; i < 3; i++) {
-            const xa = x0 + i * (x1 - x0) / 3, xb = xa + (x1 - x0) / 3;
-            face(ctx, [[xa, y0, h], [xa, y1, h], [xb, y1, h + 0.45], [xb, y0, h + 0.45]], shade(e.roof, 1.05));
-            face(ctx, [[xb, y0, h], [xb, y1, h], [xb, y1, h + 0.45]], shade(e.roof, 0.6));
-            face(ctx, [[xa, y1, h], [xb, y1, h], [xb, y1, h + 0.45]], shade(e.roof, 0.8));
-          }
-          if (era === 'industrial') { cylinder(ctx, x0 + 0.4, y0 + 0.4, h, h + 1.6, 0.16, '#7a3a2c', 10); }
-        } else {
-          gable(ctx, x0, y0, x1, y1, h, 0.7, e.roof, type !== 'stable');
-        }
-        winL(ctx, x0, y1, 0.9, 0, 0.8, 0.65, type === 'stable' || type === 'workshop' ? '#2a1e14' : '#3b2a1a');
-        for (let i = 0; i < 3; i++) winR(ctx, x1, y0, 0.3 + i * 0.85, 0.35, 0.3, 0.3, glass);
-        if (type === 'range') { const p = P(x0 + 0.3, y1 + 0.3, 0.45); ctx.fillStyle = '#e8d7a8'; ctx.beginPath(); ctx.arc(p[0], p[1], 6, 0, 7); ctx.fill(); ctx.fillStyle = '#b22'; ctx.beginPath(); ctx.arc(p[0], p[1], 3, 0, 7); ctx.fill(); }
-        if (type === 'academy' && era !== 'classical') { box(ctx, 2.0, 0.3, 2.6, 0.9, h, h + 1.2, e.wall); pyramid(ctx, 1.95, 0.25, 2.65, 0.95, h + 1.2, 0.7, e.roof); }
-        if (type === 'workshop' && era !== 'industrial') { ctx.strokeStyle = '#4b3420'; ctx.lineWidth = 2.5; const a = P(2.3, 2.4, 0), b = P(1.6, 2.6, 1.6); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
-      }
-      flag(ctx, x0 + 0.1, y0 + 0.1, prim ? 0 : h + 0.3, prim ? 1.6 : 0.8, team, t);
-      break;
-    }
-    case 'tower': {
-      if (prim) {
-        ctx.strokeStyle = '#5a3d22'; ctx.lineWidth = 2;
-        for (const [x, y] of [[0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]]) { const a = P(x, y, 0), b = P(0.5 + (x - 0.5) * 0.6, 0.5 + (y - 0.5) * 0.6, 2); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
-        box(ctx, 0.15, 0.15, 0.85, 0.85, 2, 2.15, '#8a6a42');
-        pyramid(ctx, 0.1, 0.1, 0.9, 0.9, 2.15, 0.5, '#9a7a4a');
-      } else if (futur) {
-        cylinder(ctx, 0.5, 0.5, 0, 1.4, 0.32, e.wall);
-        dome(ctx, 0.5, 0.5, 1.4, 0.35, e.roof, e.trim);
-        const a = P(0.5, 0.5, 1.7), b = P(1.1, 1.1, 1.8); ctx.strokeStyle = '#555'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-        ctx.fillStyle = e.trim; ctx.beginPath(); ctx.arc(b[0], b[1], 2.5, 0, 7); ctx.fill();
-      } else if (era === 'modern' || era === 'industrial') {
-        box(ctx, 0.05, 0.05, 0.95, 0.95, 0, 0.7, '#8d9190');
-        winL(ctx, 0.05, 0.95, 0.2, 0.35, 0.6, 0.12, '#111');
-        winR(ctx, 0.95, 0.05, 0.2, 0.35, 0.6, 0.12, '#111');
-      } else {
-        const round = era === 'medieval' || era === 'classical';
-        if (round) { cylinder(ctx, 0.5, 0.5, 0, 2.2, 0.42, e.stone); cone(ctx, 0.5, 0.5, 2.2, 0.5, 0.8, e.roof); }
-        else { box(ctx, 0.1, 0.1, 0.9, 0.9, 0, 2.0, e.wall); pyramid(ctx, 0.05, 0.05, 0.95, 0.95, 2.0, 0.7, e.roof); }
-        winL(ctx, 0.1, 0.92, 0.35, 1.3, 0.12, 0.3, dark);
-      }
-      flag(ctx, 0.5, 0.5, prim ? 2.6 : futur ? 2.0 : 2.4, 0.6, team, t);
-      break;
-    }
-    case 'generator': {
-      if (futur) {
-        cylinder(ctx, 1, 1, 0, 0.5, 0.8, e.wall);
-        const [gx, gy] = P(1, 1, 0.9);
-        const gr = ctx.createRadialGradient(gx, gy, 0, gx, gy, 26); gr.addColorStop(0, '#fff'); gr.addColorStop(0.35, '#7cf1ff'); gr.addColorStop(1, 'rgba(0,180,255,0)');
-        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(gx, gy, 26, 0, 7); ctx.fill();
-      } else if (era === 'modern') {
-        // solar panels + transformer
-        for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) face(ctx, [[0.15 + i * 0.9, 0.15 + j * 0.9, 0.25], [0.95 + i * 0.9, 0.15 + j * 0.9, 0.25], [0.95 + i * 0.9, 0.85 + j * 0.9, 0.55], [0.15 + i * 0.9, 0.85 + j * 0.9, 0.55]], '#20365a', '#7a9cc0');
-      } else {
-        box(ctx, 0.15, 0.15, 1.85, 1.6, 0, 1.0, e.wall);
-        gable(ctx, 0.15, 0.15, 1.85, 1.6, 1.0, 0.4, e.roof, true);
-        cylinder(ctx, 1.5, 1.4, 0, 2.6, 0.17, '#6e3428', 10);
-        cylinder(ctx, 1.1, 1.5, 0, 2.2, 0.15, '#6e3428', 10);
-      }
-      break;
-    }
-    default:
-      box(ctx, x0, y0, x1, y1, 0, 1, e.wall);
-  }
+  const sp = buildingSprite(type, era, team, s, 3, true);
+  ctx.drawImage(sp.canvas, -sp.ox, -sp.oy, sp.w, sp.h);
+  drawBuildingAnim(ctx, type, era, team, s, t || 0);
 }
 
-// chimneys emitting smoke (screen offsets relative to footprint corner)
+// chimneys emitting smoke: [x, y, z] in footprint-local tile units
 export function smokePoints(type, era, s) {
-  if (type === 'generator' && (era === 'industrial' || era === 'gunpowder' || era === 'medieval')) return [[1.5, 1.4, 2.7], [1.1, 1.5, 2.3]];
-  if ((type === 'workshop' || type === 'barracks' || type === 'range' || type === 'academy' || type === 'stable') && era === 'industrial') return [[0.52, 0.52, 2.7]];
-  if (type === 'house' && (era === 'medieval' || era === 'gunpowder' || era === 'iron')) return [[1, 1, 1.4]];
+  switch (type) {
+    case 'house':
+      if (era === 'stone') return [[0.95, 0.95, 1.25]];
+      if (era === 'iron') return [[1.0, 1.0, 1.35]];
+      if (era === 'medieval') return [[1.4, 0.75, 1.82]];
+      if (era === 'gunpowder') return [[0.45, 1.0, 2.22], [1.55, 1.0, 2.22]];
+      if (era === 'industrial') return [[0.5, 0.6, 2.37], [1.4, 0.6, 2.37]];
+      return [];
+    case 'town_center':
+      if (era === 'iron') return [[1.5, 1.5, 1.6]];
+      if (era === 'gunpowder') return [[0.7, 1.0, 2.07], [2.3, 1.0, 2.07]];
+      return [];
+    case 'generator': return era === 'industrial' ? [[1.5, 1.4, 2.75], [1.1, 1.55, 2.35]] : [];
+    case 'barracks': return era === 'industrial' ? [[0.55, 0.6, 2.55]] : [];
+    case 'workshop': return era === 'industrial' || era === 'gunpowder' ? [[0.55, 0.6, 2.45]] : [];
+    case 'lumber_camp': return era === 'industrial' || era === 'modern' ? [[0.4, 0.4, 1.95]] : [];
+    case 'mining_camp': return era === 'industrial' || era === 'modern' ? [[0.45, 0.45, 2.05]] : [];
+    case 'dock': return era === 'industrial' ? [[0.5, 0.5, 2.05]] : [];
+  }
   return [];
 }
 
@@ -490,6 +237,7 @@ function blob(ctx, x, y, r, col, hl) {
 
 function drawResource(ctx, type, treeStyle, v) {
   const rnd = (i) => hash2(v, i, 99);
+  if (type === 'fish') { drawFish(ctx, treeStyle, v); return; }
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath(); ctx.ellipse(4, 2, 16, 7, 0, 0, 7); ctx.fill();
   switch (type) {
@@ -577,6 +325,33 @@ function drawResource(ctx, type, treeStyle, v) {
   }
 }
 
+// a school of fish under the surface: dark shadows, glints and ripples
+function drawFish(ctx, treeStyle, v) {
+  const rnd = (i) => hash2(v, i, 77);
+  const alien = treeStyle === 'crystal';
+  // darker, deeper patch
+  const g = ctx.createRadialGradient(0, -2, 2, 0, -2, 22);
+  g.addColorStop(0, alien ? 'rgba(80,40,120,0.35)' : 'rgba(0,30,50,0.32)'); g.addColorStop(1, 'rgba(0,30,50,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, -2, 24, 12, 0, 0, 7); ctx.fill();
+  for (let i = 0; i < 7; i++) {
+    const x = (rnd(i) - 0.5) * 30, y = -2 + (rnd(i + 10) - 0.5) * 13, a = rnd(i + 20) * 6.28, l = 4 + rnd(i + 30) * 3;
+    ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.55); ctx.rotate(a);
+    ctx.fillStyle = alien ? 'rgba(60,20,90,0.55)' : 'rgba(10,30,40,0.5)';
+    ctx.beginPath(); ctx.ellipse(0, 0, l, l * 0.38, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-l * 0.8, 0); ctx.lineTo(-l * 1.5, -l * 0.4); ctx.lineTo(-l * 1.5, l * 0.4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = alien ? 'rgba(200,140,255,0.55)' : 'rgba(200,230,240,0.45)'; ctx.beginPath(); ctx.ellipse(l * 0.2, -l * 0.12, l * 0.45, l * 0.12, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  ctx.strokeStyle = 'rgba(235,250,255,0.55)'; ctx.lineWidth = 0.8;
+  for (let i = 0; i < 3; i++) { const x = (rnd(40 + i) - 0.5) * 22, y = -2 + (rnd(50 + i) - 0.5) * 9, r = 3 + rnd(60 + i) * 5; ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.45, 0, 0, 7); ctx.stroke(); }
+  for (let i = 0; i < 5; i++) { const x = (rnd(70 + i) - 0.5) * 26, y = -2 + (rnd(80 + i) - 0.5) * 11; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x, y, 1.6, 0.8); }
+  // a leaping fish
+  const lx = (rnd(90) - 0.5) * 12;
+  ctx.fillStyle = alien ? '#c8a0ff' : '#b8ccd8'; ctx.beginPath(); ctx.ellipse(lx, -9, 3.2, 1.3, -0.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(lx - 2.6, -7.6); ctx.lineTo(lx - 4.6, -7.6); ctx.lineTo(lx - 3.8, -5.6); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.ellipse(lx + 1, -1.5, 4, 1.6, 0, 0, 7); ctx.stroke();
+}
+
 // ------------------------------------------------------------------ units
 // Unit drawing is done live every frame. (x, y) is the screen position of
 // the unit's feet. anim: {walk, act, t}, dir: -1/1 horizontal facing.
@@ -646,48 +421,104 @@ function weapon(ctx, sprite, era, hx, hy, act, carry) {
   }
 }
 
+const ARMOR = { stone: '#7a5a3a', bronze: '#b8904a', iron: '#6e7278', classical: '#c8a048', medieval: '#a0a6ae', gunpowder: null, industrial: null, modern: '#5c6a46', future: '#dfe6ee', space: '#8a96a8' };
+const OL = 'rgba(18,12,8,0.8)';
 export function drawHuman(ctx, x, y, o) {
   const { team, era, sprite, dir, walk, act, busy, carry, cls } = o;
   const tc = TEAM[team] || '#bbb';
+  const fut = era === 'future' || era === 'space';
   ctx.save(); ctx.translate(x, y); ctx.scale(dir, 1);
-  // shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(0, 0, 6, 2.6, 0, 0, 7); ctx.fill();
+  if (!o.noShadow) { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0.5, 0, 6.5, 2.6, 0, 0, 7); ctx.fill(); }
   const big = sprite === 'exo' || sprite === 'marine' || sprite === 'templar' ? 1.2 : 1;
   ctx.scale(big, big);
   const step = Math.sin(walk * Math.PI * 2);
   const bob = Math.abs(step) * 0.8;
+  const worker = cls === 'worker' || cls === 'crew';
+  // palette
+  const legCol = era === 'stone' ? '#8a5a3a' : fut ? (era === 'space' ? '#6a7688' : '#b8c2ce') : era === 'modern' ? '#4c5838' : era === 'gunpowder' || era === 'industrial' ? (worker ? '#4a3a2a' : '#e8e2d4') : '#5a4630';
+  const boot = fut ? '#3a4048' : era === 'stone' ? '#6a4428' : '#2a2018';
+  let body;
+  if (worker) body = era === 'stone' ? '#9a6e44' : fut ? '#e0e6ec' : era === 'modern' ? '#d88a2a' : era === 'industrial' ? '#5a6a7a' : '#a8885a';
+  else body = ARMOR[era] || shade(tc, 0.9);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   // legs
-  ctx.strokeStyle = era === 'stone' ? '#8a5a3a' : shade(tc, 0.45); ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-  ctx.beginPath(); ctx.moveTo(-1, -7); ctx.lineTo(-1 + step * 2.5, 0); ctx.moveTo(1, -7); ctx.lineTo(1 - step * 2.5, 0); ctx.stroke();
-  // body
+  if (o.legs !== false) {
+    const lx = [[-1.3, -1.3 + step * 2.6], [1.3, 1.3 - step * 2.6]];
+    for (const [hx, fx] of lx) { ctx.strokeStyle = OL; ctx.lineWidth = 3.4; ctx.beginPath(); ctx.moveTo(hx, -7); ctx.lineTo(fx, -0.5); ctx.stroke(); }
+    for (const [hx, fx] of lx) { ctx.strokeStyle = legCol; ctx.lineWidth = 2.1; ctx.beginPath(); ctx.moveTo(hx, -7); ctx.lineTo(fx, -1.2); ctx.stroke(); ctx.strokeStyle = boot; ctx.lineWidth = 2.3; ctx.beginPath(); ctx.moveTo(fx, -1.6); ctx.lineTo(fx + 0.8, -0.4); ctx.stroke(); }
+  }
   const bodyY = -15 - bob;
-  const cloth = cls === 'worker' ? mix(tc, '#b89a6a', 0.45) : tc;
-  ctx.fillStyle = era === 'stone' && cls === 'worker' ? '#9a6e44' : cloth;
-  ctx.beginPath(); ctx.moveTo(-3.5, bodyY); ctx.lineTo(3.5, bodyY); ctx.lineTo(4, -6 - bob); ctx.lineTo(-4, -6 - bob); ctx.closePath(); ctx.fill();
-  if (era === 'medieval' && cls !== 'worker') { ctx.fillStyle = 'rgba(200,205,215,0.55)'; ctx.fillRect(-3.5, bodyY, 7, 4); }
-  if (cls !== 'worker' && era === 'stone') { ctx.fillStyle = tc; ctx.fillRect(-3.5, bodyY + 3, 7, 2); }
-  // shield
-  if (sprite === 'hoplite' || sprite === 'axe' || (sprite === 'sword' && era !== 'medieval') || sprite === 'spear' && era !== 'stone') {
-    ctx.fillStyle = sprite === 'hoplite' ? '#c29a3c' : shade(tc, 0.8);
-    ctx.beginPath(); ctx.arc(-3.5, bodyY + 5, 4.2, 0, 7); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.8; ctx.stroke();
+  // back arm
+  ctx.strokeStyle = OL; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-2.8, bodyY + 1.5); ctx.lineTo(-3.6 - step * 1.2, bodyY + 7); ctx.stroke();
+  ctx.strokeStyle = shade(body, 0.7); ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(-2.8, bodyY + 1.5); ctx.lineTo(-3.6 - step * 1.2, bodyY + 7); ctx.stroke();
+  // torso
+  const torso = () => { ctx.beginPath(); ctx.moveTo(-3.6, bodyY + 0.6); ctx.quadraticCurveTo(0, bodyY - 1.2, 3.6, bodyY + 0.6); ctx.lineTo(4.1, -6.2 - bob); ctx.quadraticCurveTo(0, -5.2 - bob, -4.1, -6.2 - bob); ctx.closePath(); };
+  torso();
+  const g = ctx.createLinearGradient(-4, 0, 4, 0); g.addColorStop(0, shade(body, 1.18)); g.addColorStop(0.55, shade(body, 0.95)); g.addColorStop(1, shade(body, 0.68));
+  ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.8; ctx.stroke();
+  ctx.save(); torso(); ctx.clip();
+  if (worker) {
+    // team sash / collar
+    ctx.strokeStyle = tc; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(-3.6, bodyY + 1); ctx.lineTo(3.6, bodyY + 6); ctx.stroke();
+    ctx.fillStyle = shade(body, 0.6); ctx.fillRect(-4.5, -8 - bob, 9, 1.1);
+  } else if (era === 'gunpowder' || era === 'industrial') {
+    ctx.fillStyle = shade(tc, 1.0); ctx.fillRect(-5, bodyY - 2, 10, 12); // uniform coat
+    ctx.fillStyle = shade(tc, 0.75); ctx.fillRect(1.5, bodyY - 2, 4, 12);
+    if (era === 'gunpowder') { ctx.strokeStyle = '#f0ece0'; ctx.lineWidth = 0.9; ctx.beginPath(); ctx.moveTo(-3.5, bodyY); ctx.lineTo(3.5, -7 - bob); ctx.moveTo(3.5, bodyY); ctx.lineTo(-3.5, -7 - bob); ctx.stroke(); }
+    else { ctx.fillStyle = '#3a3020'; ctx.fillRect(-5, -8.4 - bob, 10, 1.2); }
+  } else {
+    // tabard in team colour over the armour
+    ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(-1.9, bodyY); ctx.lineTo(1.9, bodyY); ctx.lineTo(2.3, -5 - bob); ctx.lineTo(-2.3, -5 - bob); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(0.5, bodyY, 2, 10);
+    if (era === 'medieval') { ctx.fillStyle = 'rgba(255,255,255,0.18)'; for (let i = 0; i < 4; i++) ctx.fillRect(-4, bodyY + 1 + i * 2, 8, 0.5); }
+    if (fut) { ctx.fillStyle = era === 'space' ? '#ffb84a' : '#39d4ff'; ctx.fillRect(-4, bodyY + 4, 8, 0.8); }
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-5, -8.2 - bob, 10, 1.1); // belt
+  }
+  ctx.restore();
+  // shield (team coloured with rim and boss)
+  if (sprite === 'hoplite' || sprite === 'axe' || (sprite === 'sword' && era !== 'medieval') || (sprite === 'spear' && era !== 'stone') || (sprite === 'sword' && era === 'medieval')) {
+    const sx = -4.2, sy = bodyY + 5.5;
+    ctx.beginPath();
+    if (era === 'medieval') { ctx.moveTo(sx - 3.5, sy - 4); ctx.lineTo(sx + 3.5, sy - 4); ctx.quadraticCurveTo(sx + 3.5, sy + 2, sx, sy + 5); ctx.quadraticCurveTo(sx - 3.5, sy + 2, sx - 3.5, sy - 4); }
+    else ctx.ellipse(sx, sy, 4.2, 4.6, 0, 0, 7);
+    const sg = ctx.createLinearGradient(sx - 4, sy - 4, sx + 4, sy + 4); sg.addColorStop(0, shade(sprite === 'hoplite' ? '#d8b048' : tc, 1.2)); sg.addColorStop(1, shade(sprite === 'hoplite' ? '#d8b048' : tc, 0.65));
+    ctx.fillStyle = sg; ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.strokeStyle = sprite === 'hoplite' ? tc : '#d8c08a'; ctx.lineWidth = 0.8; ctx.beginPath(); if (era === 'medieval') { ctx.moveTo(sx, sy - 3.5); ctx.lineTo(sx, sy + 4); ctx.moveTo(sx - 3, sy - 1); ctx.lineTo(sx + 3, sy - 1); } else ctx.arc(sx, sy, 2.6, 0, 7); ctx.stroke();
+    if (era !== 'medieval') { ctx.fillStyle = '#e8d8a0'; ctx.beginPath(); ctx.arc(sx, sy, 1, 0, 7); ctx.fill(); }
   }
   // head
-  const hx = 0.5, hy = bodyY - 3.5;
-  ctx.fillStyle = SKIN[(o.id || 0) % SKIN.length];
-  ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fill();
-  headgear(ctx, era, sprite, tc, hx, hy);
-  // arm + tool
+  const hx = 0.5, hy = bodyY - 3.6;
+  const skin = SKIN[(o.id || 0) % SKIN.length];
+  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(hx, hy, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = OL; ctx.lineWidth = 0.7; ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.arc(hx + 0.9, hy + 0.3, 2.4, -0.9, 1.6); ctx.fill();
+  ctx.fillStyle = '#1a120c'; ctx.fillRect(hx + 1.3, hy - 0.6, 0.9, 0.9);
+  if (worker || era === 'stone') { ctx.fillStyle = ['#3a2416', '#6a4424', '#1a1410', '#a87a3a'][(o.id || 0) % 4]; ctx.beginPath(); ctx.arc(hx - 0.4, hy - 0.8, 3, Math.PI * 0.95, Math.PI * 2.05); ctx.fill(); }
+  if (worker) {
+    if (era === 'modern' || era === 'industrial') { ctx.fillStyle = era === 'modern' ? '#f2c230' : '#4a4a3a'; ctx.beginPath(); ctx.arc(hx, hy - 0.6, 3.4, Math.PI, 0); ctx.fill(); ctx.fillRect(hx - 3.8, hy - 0.9, 7.6, 0.9); }
+    else if (era === 'medieval' || era === 'gunpowder') { ctx.fillStyle = '#c8b078'; ctx.beginPath(); ctx.ellipse(hx, hy - 2, 4.6, 1.3, 0, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(hx, hy - 2.2, 2.4, Math.PI, 0); ctx.fill(); }
+    else if (fut) { ctx.fillStyle = 'rgba(160,230,255,0.45)'; ctx.beginPath(); ctx.arc(hx, hy, 4, 0, 7); ctx.fill(); ctx.strokeStyle = '#d8e0e8'; ctx.lineWidth = 0.7; ctx.stroke(); }
+  } else headgear(ctx, era, sprite, tc, hx, hy);
+  // front arm + tool / weapon
   const a = busy ? act : 0;
-  if (cls === 'worker') {
-    ctx.save(); ctx.translate(2.5, bodyY + 2); ctx.rotate(-1.2 + Math.sin(a * Math.PI) * 1.6);
-    ctx.strokeStyle = '#6b4424'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -8); ctx.stroke();
-    ctx.fillStyle = era === 'stone' ? '#888' : '#aab'; ctx.fillRect(-2, -9, 4, 2);
+  if (cls === 'crew') { ctx.restore(); return; }
+  if (worker) {
+    ctx.save(); ctx.translate(2.6, bodyY + 2); ctx.rotate(-1.2 + Math.sin(a * Math.PI) * 1.6);
+    ctx.strokeStyle = '#5a3a1c'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(0, 1); ctx.lineTo(0, -8); ctx.stroke();
+    ctx.fillStyle = era === 'stone' ? '#8a8680' : '#b8c0c8'; ctx.beginPath(); ctx.moveTo(-2.6, -8.6); ctx.lineTo(2.6, -9.4); ctx.lineTo(2, -7.4); ctx.lineTo(-2.2, -7.2); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
     ctx.restore();
-    if (carry >= 0) { ctx.fillStyle = RES_COLORS[carry]; ctx.beginPath(); ctx.arc(-3, bodyY + 1, 2.6, 0, 7); ctx.fill(); }
+    if (carry >= 0) {
+      ctx.fillStyle = RES_COLORS[carry]; ctx.strokeStyle = OL; ctx.lineWidth = 0.7;
+      ctx.beginPath(); ctx.ellipse(-3.2, bodyY + 1.5, 3, 2.6, 0, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(-4, bodyY + 0.6, 1, 0, 7); ctx.fill();
+    }
   } else {
     weapon(ctx, sprite, era, 2.5, bodyY + 3, a, null);
   }
+  // front arm / hand
+  ctx.strokeStyle = OL; ctx.lineWidth = 2.8; ctx.beginPath(); ctx.moveTo(2.6, bodyY + 1.2); ctx.lineTo(2.8, bodyY + 3.2); ctx.stroke();
+  ctx.strokeStyle = shade(worker ? body : (ARMOR[era] || tc), 0.95); ctx.lineWidth = 1.7; ctx.stroke();
+  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(2.7, bodyY + 3.4, 1.1, 0, 7); ctx.fill();
   ctx.restore();
 }
 
@@ -700,7 +531,7 @@ function quadruped(ctx, o, col, sc, kind) {
   ctx.moveTo(-6, -7); ctx.lineTo(-6 + step * 2.5, 0); ctx.moveTo(-4, -7); ctx.lineTo(-4 - step * 2.5, 0);
   ctx.moveTo(5, -7); ctx.lineTo(5 - step * 2.5, 0); ctx.moveTo(7, -7); ctx.lineTo(7 + step * 2.5, 0); ctx.stroke();
   const g = ctx.createLinearGradient(0, -14, 0, -5); g.addColorStop(0, shade(col, 1.2)); g.addColorStop(1, shade(col, 0.75));
-  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, -9.5, 9, 4.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, -9.5, 9, 4.5, 0, 0, 7); ctx.strokeStyle = 'rgba(18,12,8,0.7)'; ctx.lineWidth = 0.8; ctx.stroke(); ctx.fill();
   // neck & head
   ctx.beginPath(); ctx.moveTo(6, -11); ctx.lineTo(10, -17); ctx.lineTo(13, -16); ctx.lineTo(9, -9); ctx.closePath(); ctx.fill();
   ctx.beginPath(); ctx.ellipse(12.5, -16.5, 3.4, 2, 0.4, 0, 7); ctx.fill();
@@ -742,6 +573,10 @@ export function drawUnit(ctx, x, y, o) {
   const dir = dx < 0 ? -1 : 1;
   const tc = TEAM[o.team] || '#bbb';
   const era = d.era || o.era;
+  if (d.naval || d.class === 'naval') {
+    drawShip(ctx, x, y, { ...o, era, moving: o.moving ?? (o.walk > 0) }, drawHuman);
+    return;
+  }
   if (d.class === 'animal') {
     ctx.save(); ctx.translate(x, y); ctx.scale(dir * 1.25, 1.25);
     if (sprite === 'mammoth') {
@@ -873,6 +708,21 @@ export function resIcon(ctx, r, x, y, s) {
   ctx.restore();
 }
 
+// tight bounding box (in sprite px) of a cached building sprite, ignoring
+// the soft shadow (alpha < 0.5)
+function spriteBBox(b) {
+  if (b.bbox) return b.bbox;
+  const W = b.canvas.width, H = b.canvas.height;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  try {
+    const d = b.canvas.getContext('2d').getImageData(0, 0, W, H).data;
+    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (d[(y * W + x) * 4 + 3] > 200) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  } catch (e) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
+  if (x1 <= x0) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
+  b.bbox = [x0 / 2, y0 / 2, (x1 + 2) / 2, (y1 + 2) / 2];
+  return b.bbox;
+}
+
 // Renders a small portrait/icon canvas for an entity type.
 export function iconCanvas(kind, type, def, era, team, themeName, size = 44) {
   const cv = document.createElement('canvas');
@@ -883,16 +733,20 @@ export function iconCanvas(kind, type, def, era, team, themeName, size = 44) {
   g.addColorStop(0, '#3a4a5a'); g.addColorStop(1, '#1a2028');
   ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
   if (kind === 'unit') {
-    ctx.save(); ctx.translate(size / 2, size * 0.86); const s = def.class === 'mounted' || def.class === 'siege' || def.class === 'animal' ? 1.15 : 1.6; ctx.scale(s, s);
+    const naval = def.naval || def.class === 'naval';
+    ctx.save(); ctx.translate(size / 2, size * (naval ? 0.66 : 0.86)); const s = naval ? size / 60 : def.class === 'mounted' || def.class === 'siege' || def.class === 'animal' ? 1.15 : 1.6; ctx.scale(s, s);
     const fly = def.flying ? 1.3 * ZH : 0;
     drawUnit(ctx, 0, fly * 0.5, { def, team, era, face: 0.4, walk: 0.15, act: 0.3, busy: false, carry: -1, id: 1, t: 0 });
     ctx.restore();
   } else if (kind === 'building') {
-    const b = buildingSprite(type, era, team, def.size, 3);
-    const sc = Math.min(size / b.w, size / (b.h * 0.75)) * 1.1;
-    ctx.drawImage(b.canvas, (size - b.w * sc) / 2, size - b.h * sc + 6, b.w * sc, b.h * sc);
+    const b = buildingSprite(type, era, team, def.size || 2, 3);
+    const bb = spriteBBox(b);
+    const bw = bb[2] - bb[0], bh = bb[3] - bb[1];
+    const sc = Math.min((size - 4) / bw, (size - 4) / bh);
+    ctx.drawImage(b.canvas, bb[0] * 2, bb[1] * 2, bw * 2, bh * 2, (size - bw * sc) / 2, (size - bh * sc) / 2 + 1, bw * sc, bh * sc);
   } else if (kind === 'resource') {
     const r = resourceSprite(type, themeName, 1);
+    if (type === 'fish') { const wg = ctx.createLinearGradient(0, 0, 0, size); wg.addColorStop(0, '#2d6f96'); wg.addColorStop(1, '#1a4a6a'); ctx.fillStyle = wg; ctx.fillRect(0, 0, size, size); }
     // crop around the object: 56x56 px above the anchor
     const cw = type === 'tree' ? 64 : 44;
     ctx.drawImage(r.canvas, (r.ox - cw / 2) * 2, (r.oy - cw * 0.85) * 2, cw * 2, cw * 2, 0, 0, size, size);

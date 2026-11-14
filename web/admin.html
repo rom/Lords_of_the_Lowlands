@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administration · Lords of the Lowlands</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/admin.css">
+<link rel="icon" href="data:,">
+</head>
+<body class="admin">
+<header id="atop">
+  <a class="btn small" href="/">◂ Game</a>
+  <b class="etitle">Server Administration</b>
+  <nav class="atabs">
+    <button class="tab active" data-tab="users">Players</button>
+    <button class="tab" data-tab="rooms">Games</button>
+    <button class="tab" data-tab="stats">Health &amp; Performance</button>
+    <button class="tab" data-tab="audit">Audit Log</button>
+  </nav>
+  <span id="whoami" class="fine"></span>
+</header>
+<main id="amain">
+  <p class="err" id="aerr"></p>
+  <section id="tab-users" class="apanel">
+    <div class="abar">
+      <input id="filter" placeholder="Filter players…">
+      <select id="statusfilter"><option value="">All statuses</option><option value="pending">Awaiting approval</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="flagged">Flagged by anti-cheat</option></select>
+      <span class="fine" id="regmode"></span>
+    </div>
+    <table class="results" id="users"></table>
+    <details class="panel acreate">
+      <summary>Create a player account</summary>
+      <form id="createform" class="form-grid">
+        <label>Name <input id="cname" required pattern="[A-Za-z0-9_\-]{3,20}"></label>
+        <label>Initial password <input id="cpw" type="password" required minlength="8" autocomplete="new-password"></label>
+        <label>Role <select id="crole"><option value="user">Player</option><option value="admin">Administrator</option></select></label>
+        <label class="check"><input type="checkbox" id="cmfa"> Require MFA</label>
+        <label>Note <input id="cnote" maxlength="300"></label>
+        <div class="row"><button class="btn primary">Create</button></div>
+      </form>
+    </details>
+  </section>
+  <section id="tab-rooms" class="apanel hidden"><table class="results" id="rooms"></table></section>
+  <section id="tab-stats" class="apanel hidden">
+    <div class="cards" id="cards"></div>
+    <div class="charts">
+      <div class="panel"><h3>Tick time (ms, p50/p95)</h3><canvas id="tickchart" width="900" height="220"></canvas></div>
+      <div class="panel"><h3>Network (messages/s out)</h3><canvas id="netchart" width="900" height="220"></canvas></div>
+    </div>
+    <p class="fine">Endpoints for monitoring: <code>/healthz</code>, <code>/readyz</code>, <code>/api/health</code>, <code>/api/stats</code>, <code>/metrics</code> (Prometheus).</p>
+  </section>
+  <section id="tab-audit" class="apanel hidden"><table class="results" id="audit"></table></section>
+</main>
+<div id="overlay" class="hidden"></div>
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>

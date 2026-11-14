@@ -74,9 +74,12 @@ export async function api(path, opts = {}) {
   const r = await fetch(path, o);
   let data = null;
   try { data = await r.json(); } catch (e) { /* empty */ }
-  if (!r.ok) throw new Error((data && data.error) || r.statusText);
+  if (!r.ok) { const e = new Error((data && data.error) || r.statusText); e.data = data; e.status = r.status; throw e; }
   return data;
 }
 
 export function lerp(a, b, t) { return a + (b - a) * t; }
 export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+export const DIFFICULTIES = [['super_easy', 'Super easy'], ['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard'], ['super_hard', 'Super hard'], ['insane', 'Insane']];
+export const MAP_TYPES = [['inland', 'Inland'], ['coastal', 'Coastal'], ['riverland', 'Riverland'], ['lakes', 'Lakes'], ['desert', 'Desert'], ['highland', 'Highland']];

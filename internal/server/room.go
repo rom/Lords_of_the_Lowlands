@@ -30,11 +30,11 @@ const (
 
 // Slot is a seat in a room.
 type Slot struct {
-	Kind   string `json:"kind"`
-	Name   string `json:"name,omitempty"`
-	Team   int    `json:"team"`
-	Diff   string `json:"diff,omitempty"`
-	Reserved bool `json:"reserved,omitempty"` // seat of a restored game
+	Kind     string `json:"kind"`
+	Name     string `json:"name,omitempty"`
+	Team     int    `json:"team"`
+	Diff     string `json:"diff,omitempty"`
+	Reserved bool   `json:"reserved,omitempty"` // seat of a restored game
 	client   *Client
 	player   int
 	guest    bool

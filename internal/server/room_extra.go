@@ -134,7 +134,10 @@ func demoLevel(rng *rand.Rand) (*game.Level, int) {
 		return l, 2 + rng.Intn(3)
 	}
 	start := rng.Intn(game.MaxAge + 1)
-	theme := demoThemes[rng.Intn(len(demoThemes))]
+	theme := demoThemes[rng.Intn(5)] // earthly themes for historical ages
+	if start >= 14 {
+		theme = demoThemes[5+rng.Intn(3)]
+	}
 	mt := game.MapTypes[rng.Intn(len(game.MapTypes))]
 	n := 2 + rng.Intn(3)
 	l, err := levels.Skirmish(levels.SkirmishOptions{Theme: theme, Size: 56 + 8*rng.Intn(4), StartAge: start,
