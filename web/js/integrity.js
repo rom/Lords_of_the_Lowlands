@@ -71,7 +71,7 @@ export function makeSigner(keyB64) {
   };
 }
 
-const MODULES = ['/js/main.js', '/js/game.js', '/js/render.js', '/js/sprites.js', '/js/audio.js', '/js/net.js', '/js/util.js', '/js/integrity.js'];
+const MODULES = ['/js/main.js', '/js/game.js', '/js/render.js', '/js/sprites.js', '/js/audio.js', '/js/net.js', '/js/util.js', '/js/integrity.js', '/js/manual.js'];
 
 // integrityReport hashes the client's own modules (as served) and reports
 // automation signals; the server compares the digests.

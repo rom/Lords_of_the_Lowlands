@@ -6,6 +6,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/rom/lords_of_the_lowlands/docs"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -116,6 +117,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/logout", s.handleLogout)
 	m.HandleFunc("GET /api/me", s.handleMe)
 	m.HandleFunc("GET /api/defs", s.handleDefs)
+	m.HandleFunc("GET /api/docs/{name}", s.handleDoc)
 	m.HandleFunc("GET /api/levels", s.handleLevels)
 	m.HandleFunc("GET /api/levels/{id}", s.handleLevel)
 	m.HandleFunc("POST /api/levels", s.handleSaveLevel)
@@ -263,6 +265,18 @@ func decode(r *http.Request, v interface{}) error {
 
 // ---------------------------------------------------------------------------
 // Game data & levels
+
+// handleDoc serves the player manual and FAQ (Markdown) for the in-game viewer.
+func (s *Server) handleDoc(w http.ResponseWriter, r *http.Request) {
+	b, ok := docs.Player(r.PathValue("name"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "document not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(b)
+}
 
 func (s *Server) handleDefs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, game.AllDefs())

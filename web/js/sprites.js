@@ -1,7 +1,7 @@
 // Procedural art: terrain palettes, buildings, resources, units and icons.
 // Everything is drawn with canvas paths so no image assets are needed.
 import { TW, TH, ZH, TEAM, hexToRgb, shade, mix, rgb, hash2 } from './util.js';
-import { recStart, recStop, castShadows, setGround } from './art/kit.js';
+import { recStart, recStop, castShadows, setGround, flagCapture, drawFlagCloth } from './art/kit.js';
 import { drawShip } from './art/naval.js';
 import { drawBuildingBody, drawConstruction, drawAnim, hasAnim } from './art/buildings.js';
 import { drawHuman, drawUnitFig } from './art/units.js';
@@ -145,7 +145,7 @@ function layer(w, h) {
 // the footprint's top corner). live=true leaves out parts that
 // drawBuildingAnim animates (windmill sails, glows) so they can be drawn live.
 export function buildingSprite(type, era, team, size, stage, live = false) {
-  const key = stage < 3 ? `${type}|${era}|-|${size}|${stage}|0` : `${type}|${era}|${team}|${size}|${stage}|${live && hasAnim(type, era) ? 1 : 0}`;
+  const key = stage < 3 ? `${type}|${era}|-|${size}|${stage}|0` : `${type}|${era}|${team}|${size}|${stage}|${live ? 1 : 0}`;
   let c = bcache.get(key);
   if (c) return c;
   const padL = 44, padR = 150, top = 220, bottom = 24 + (type === 'dock' ? 60 : 0);
@@ -157,10 +157,12 @@ export function buildingSprite(type, era, team, size, stage, live = false) {
   for (const c2 of [gctx, bctx, ctx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, c2.canvas.width, c2.canvas.height); }
   for (const c2 of [gctx, bctx]) c2.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
   setGround(gctx); recStart();
+  const flags = stage === 3 && live ? [] : null;
+  flagCapture(flags);
   try {
     if (stage < 3) drawConstruction(bctx, type, era, size, stage);
     else drawBuildingBody(bctx, type, era, team, size, 0, live);
-  } finally { setGround(null); }
+  } finally { setGround(null); flagCapture(null); }
   const vols = recStop();
   ctx.drawImage(scratch.g, 0, 0, W2, H2, 0, 0, W2, H2);
   ctx.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
@@ -179,9 +181,17 @@ export function buildingSprite(type, era, team, size, stage, live = false) {
   x0 &= ~1; y0 &= ~1; x1 = Math.min(W2, x1 + (x1 & 1)); y1 = Math.min(H2, y1 + (y1 & 1));
   const cv = layer(x1 - x0, y1 - y0);
   cv.getContext('2d').drawImage(scratch.c, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
-  c = { canvas: cv, ox: ox - x0 / 2, oy: oy - y0 / 2, w: (x1 - x0) / 2, h: (y1 - y0) / 2 };
+  c = { canvas: cv, ox: ox - x0 / 2, oy: oy - y0 / 2, w: (x1 - x0) / 2, h: (y1 - y0) / 2, flags };
   bcache.set(key, c);
   return c;
+}
+
+// Waving flag cloths of a live building sprite (sp.flags, recorded when the
+// sprite was built with live=true); origin = footprint top corner.
+export function drawBuildingFlags(ctx, sp, t) {
+  const f = sp && sp.flags;
+  if (!f) return;
+  for (let i = 0; i < f.length; i++) { const q = f[i]; drawFlagCloth(ctx, q[0], q[1], q[2], q[3], t, q[4]); }
 }
 
 // true when drawBuildingAnim has something to animate for this building
@@ -194,6 +204,7 @@ export function drawBuilding(ctx, type, era, team, s, t) {
   const sp = buildingSprite(type, era, team, s, 3, true);
   ctx.drawImage(sp.canvas, -sp.ox, -sp.oy, sp.w, sp.h);
   drawBuildingAnim(ctx, type, era, team, s, t || 0);
+  drawBuildingFlags(ctx, sp, t || 0);
 }
 
 // Damaged variant of a cached building sprite (level 1: soot and cracks,

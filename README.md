@@ -76,20 +76,24 @@ effect and piece of music is generated procedurally at runtime.
 
 ## Screenshots
 
+All game scenes are real matches played by computer opponents (saved and restored), not staged.
+
 | | |
 |---|---|
-| ![Campaign](docs/screenshots/campaign.png) | ![Dawn Age](docs/screenshots/dawn.png) |
-| *The campaign: 17 chapters from the Dawn Age to the stars* | *Dawn Age: hunting, foraging and the first huts* |
+| ![Campaign](docs/screenshots/campaign.png) | ![Neolithic Age](docs/screenshots/dawn.png) |
+| *The campaign: 17 chapters from the Dawn Age to the stars* | *Neolithic Age: round huts, the first fields, hunters and foragers* |
 | ![High Middle Ages](docs/screenshots/medieval.png) | ![Industrial Age](docs/screenshots/industrial.png) |
-| *High Middle Ages: keeps, knights and longbows* | *Industrial Age: brick, rifles and power plants* |
-| ![Interstellar Age](docs/screenshots/space.png) | ![Level editor](docs/screenshots/editor.png) |
-| *Interstellar Age: void marines and starfighters* | *The level editor* |
+| *High Middle Ages: a castle, half-timbered houses, docks and an enemy army at the gates* | *Industrial Age: brick terraces, factories, hangars and energy crystals* |
+| ![Interstellar Age](docs/screenshots/space.png) | ![Coastal Bronze Age](docs/screenshots/coastal.png) |
+| *Interstellar Age: habitat domes, a starport and void marines* | *Bronze Age on the coast: mud-brick town, ziggurat, palms and archers* |
+| ![Tech tree](docs/screenshots/techtree.png) | ![Manual](docs/screenshots/manual.png) |
+| *Your own tech tree (`F2`): every age, unit line and technology* | *The user manual and FAQ, built into the game (`F4`)* |
+| ![Level editor](docs/screenshots/editor.png) | ![Demo mode](docs/screenshots/demo.png) |
+| *The level editor* | *Demo mode: the game plays itself when nobody is at the keyboard* |
 | ![Lobby](docs/screenshots/lobby.png) | ![Room](docs/screenshots/room.png) |
-| *Multiplayer lobby with global chat* | *A battle room: humans and AI, teams and seats* |
+| *Multiplayer lobby with global chat* | *A battle room: humans and AI, teams, seats and map size* |
 | ![Administration](docs/screenshots/admin.png) | ![Health & performance](docs/screenshots/admin-stats.png) |
 | *Administration: approve, block, roles, MFA, passwords* | *Live health and performance dashboard* |
-| ![Demo mode](docs/screenshots/demo.png) | ![Coastal map](docs/screenshots/naval.png) |
-| *Demo mode: the game plays itself when nobody is at the keyboard* | *Coastal map: harbour, fishing boat and fish schools* |
 
 ## Quick start
 
@@ -165,6 +169,11 @@ Set `metrics.token` (≥ 16 characters) and scrape with `Authorization: Bearer <
 
 ## How to play
 
+New to the game? Read the **[User Manual](docs/manual.md)** — objectives, economy, the seventeen
+ages, tactics, balance, difficulties and every option — and the **[FAQ](docs/faq.md)** with 100
+questions and answers. Both are also built into the game: **Manual & FAQ** in the main menu or on the
+sign-in screen, or `F4` during play.
+
 Press **`?`** (or `F1`, or the **?** button) in a game for the full shortcut sheet; the level editor has its own (`?` there too).
 
 | Action | Control |
@@ -219,7 +228,8 @@ docs/               architecture, design, ADRs, ASRs, API, security, tests, oper
 
 ## Documentation
 
-See [docs/README.md](docs/README.md): architecture, detailed design, game design, API, security,
+For players: the [User Manual](docs/manual.md) and the [FAQ](docs/faq.md) (also in-game, `F4`).
+For everything else see [docs/README.md](docs/README.md): architecture, detailed design, game design, API, security,
 architecture decision records, architecturally significant requirements, testing, operations and the
 level-editor guide.
 

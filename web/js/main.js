@@ -1,4 +1,5 @@
 // Application shell: authentication, menus, lobby, rooms and chat.
+import { openManual } from './manual.js';
 import { el, $, $$, api, TEAM, TEAM_NAMES, DIFFICULTIES, MAP_TYPES } from './util.js';
 import { makeSigner, integrityReport } from './integrity.js';
 import { Net } from './net.js';
@@ -100,6 +101,8 @@ class App {
     });
     $('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST', body: {} }).catch(() => {}); this.net.close(); this.me = null; this.show('login'); });
     $('#skgo').addEventListener('click', () => this.startSkirmish());
+    $('#manualbtn').addEventListener('click', () => openManual('manual'));
+    $('#loginmanual').addEventListener('click', () => openManual('manual'));
     $('#create').addEventListener('click', () => {
       const v = $('#newlevel').value;
       const msg = { t: 'create', name: $('#newname').value || `${this.me.name}'s battle` };

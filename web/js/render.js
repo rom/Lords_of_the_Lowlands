@@ -1,9 +1,10 @@
 // Isometric renderer: procedural terrain chunks, animated water, entities,
 // effects, fog of war and minimap.
 import { TW, TH, ZH, TEAM, iso, fbm, vnoise, hash2, clamp, shade } from './util.js';
-import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite, TREE_VARIANTS } from './sprites.js';
+import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, drawBuildingFlags, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite, TREE_VARIANTS } from './sprites.js';
 import { decorateChunk } from './art/terrain.js';
 import { isFootUnit } from './art/units.js';
+import { puffSprite, glowSprite, stamp, shockwave } from './art/fx.js';
 
 const CH = 8; // chunk size in tiles
 const T_WATER = 3, T_MTN = 4, T_SHALLOW = 5;
@@ -21,6 +22,7 @@ export class Renderer {
     this.texts = [];
     this.corpses = [];   // short-lived client-side death animations
     this.decals = [];    // scorch marks and rubble that fade out
+    this.waves = [];     // explosion shockwave rings
     this.birds = null;
     this.lastEnts = null;
     this.time = 0;
@@ -161,7 +163,10 @@ export class Renderer {
         // bilinear blend between the four nearest tile centres
         const gx = wx - 0.5, gy = wy - 0.5;
         const ix = Math.floor(gx), iy = Math.floor(gy);
-        let fx = gx - ix + (n1 - 0.5) * 0.55, fy = gy - iy + (n2 - 0.5) * 0.2 + (n1 - 0.5) * 0.4;
+        // domain warp at two scales: large lobes plus a ragged fringe, so tile
+        // borders read as organic patches rather than diamonds
+        const n3 = vnoise(wx * 2.6 + 11.3, wy * 2.6 - 4.1, 17), n4 = vnoise(wx * 2.6 - 7.7, wy * 2.6 + 9.2, 19);
+        let fx = gx - ix + (n1 - 0.5) * 0.55 + (n3 - 0.5) * 0.55, fy = gy - iy + (n2 - 0.5) * 0.2 + (n1 - 0.5) * 0.4 + (n4 - 0.5) * 0.55;
         fx = clamp((fx - 0.5) * 1.8 + 0.5, 0, 1); fy = clamp((fy - 0.5) * 1.8 + 0.5, 0, 1);
         fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
         acc[0] = acc[1] = acc[2] = 0;
@@ -183,15 +188,18 @@ export class Renderer {
           const hsh = hash2(Math.floor(wx * 44), Math.floor(wy * 44), 3);
           if (ww < 0.2 && hsh > 0.93) lg *= hsh > 0.975 ? 1.12 : 0.88;
           // wet sand on the land side of the shore, foam on the water side
-          if (ww > 0.12 && ww < 0.5) lg *= 1 - 0.22 * Math.sin((ww - 0.12) / 0.38 * Math.PI);
+          const wsum = ww + ws;
+          if (wsum > 0.12 && wsum < 0.5) lg *= 1 - 0.22 * Math.sin((wsum - 0.12) / 0.38 * Math.PI);
         }
         let r = acc[0] * lg, g2 = acc[1] * lg, b2 = acc[2] * lg;
-        if (!space && ww > 0.46 && ww < 0.66) { const f = (1 - Math.abs(ww - 0.54) / 0.1) * (0.55 + n2 * 0.6); if (f > 0) { const k = Math.min(0.75, f * 0.6); r += (245 - r) * k; g2 += (250 - g2) * k; b2 += (252 - b2) * k; } }
+        const wsF = ww + ws * 0.85;
+        if (!space && wsF > 0.46 && wsF < 0.66) { const f = (1 - Math.abs(wsF - 0.54) / 0.1) * (ww > ws ? 0.55 + n2 * 0.6 : 0.3 + n2 * 0.4); if (f > 0) { const k = Math.min(0.75, f * 0.6); r += (245 - r) * k; g2 += (250 - g2) * k; b2 += (252 - b2) * k; } }
         d[o] = r; d[o + 1] = g2; d[o + 2] = b2; d[o + 3] = 255;
         if (mimg) {
           const wa = clamp((ww + ws * 0.7 - 0.5) * 4 + 0.5, 0, 1);
           mimg.data[o] = mimg.data[o + 1] = mimg.data[o + 2] = 255; mimg.data[o + 3] = wa * 255;
-          if (ww > 0.5 && ww < 0.85 && !space) { const f = 1 - Math.abs(ww - 0.62) / 0.23; fimg.data[o] = fimg.data[o + 1] = fimg.data[o + 2] = 255; fimg.data[o + 3] = Math.max(0, f) * (0.3 + 0.7 * vnoise(wx * 9, wy * 9, 11)) * 210; }
+          const wf = ww + ws * 0.8;
+          if (wf > 0.5 && wf < 0.85 && !space) { const f = 1 - Math.abs(wf - 0.62) / 0.23; fimg.data[o] = fimg.data[o + 1] = fimg.data[o + 2] = 255; fimg.data[o + 3] = Math.max(0, f) * (0.3 + 0.7 * vnoise(wx * 9, wy * 9, 11)) * 210; }
         }
       }
     }
@@ -206,8 +214,8 @@ export class Renderer {
       water = [0, 1].map(k => {
         const wv = document.createElement('canvas'); wv.width = cw; wv.height = chh;
         const wc = wv.getContext('2d');
-        const tx = ((k * 64 - ox) % 128 + 128) % 128 - 128, ty = ((k * 32 - oy) % 64 + 64) % 64 - 64;
-        wc.save(); wc.translate(tx, ty); wc.fillStyle = this.waterPattern; wc.fillRect(0, 0, cw + 128, chh + 64); wc.restore();
+        const tx = ((k * 128 - ox) % 256 + 256) % 256 - 256, ty = ((k * 64 - oy) % 128 + 128) % 128 - 128;
+        wc.save(); wc.translate(tx, ty); wc.fillStyle = this.waterPattern; wc.fillRect(0, 0, cw + 256, chh + 128); wc.restore();
         wc.globalCompositeOperation = 'destination-in'; wc.drawImage(mask, 0, 0);
         return wv;
       });
@@ -322,6 +330,9 @@ export class Renderer {
         this.flashes.push({ x: ev.x, y: ev.y, t0: t, d: 0.25, r: 22 + ev.d * 18, c: '255,190,90' });
         for (let i = 0; i < 18; i++) this.puff(ev.x, ev.y, ev.d * 0.6, i % 3 ? 'smoke' : 'fire');
         for (let i = 0; i < 8; i++) this.puff(ev.x, ev.y, 0.1, 'debris');
+        for (let i = 0; i < 3; i++) this.puff(ev.x, ev.y, 0.15 + ev.d * 0.2, 'fireball');
+        for (let i = 0; i < 12; i++) this.puff(ev.x, ev.y, 0.1, 'ember');
+        this.waves.push({ x: ev.x, y: ev.y, t0: t, d: 0.5, R: 26 + (ev.d || 0) * 40 });
         this.addDecal({ k: 'scorch', x: ev.x, y: ev.y, r: 0.35 + (ev.d || 0) * 0.5, life: 10 });
         break;
       }
@@ -372,7 +383,7 @@ export class Renderer {
 
   puff(x, y, r, kind) {
     const a = Math.random() * 6.28, d = Math.random() * r;
-    const p = { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, z: 0.1, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, vz: 0.5 + Math.random(), life: 1, kind, t0: this.time };
+    const p = { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, z: 0.1, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, vz: 0.5 + Math.random(), life: 1, kind, t0: this.time, v: (Math.random() * 4) | 0 };
     switch (kind) {
       case 'smoke': p.vz = 0.6 + Math.random() * 0.5; p.life = 1.6 + Math.random(); p.size = 5 + Math.random() * 6; break;
       case 'gunsmoke': p.vz = 0.25 + Math.random() * 0.2; p.vx *= 0.4; p.vy *= 0.4; p.life = 1.1 + Math.random() * 0.6; p.size = 2.5 + Math.random() * 2; break;
@@ -384,6 +395,8 @@ export class Renderer {
       case 'chip': case 'gold': case 'grit': case 'shard': case 'leaf': p.vz = 1.4; p.vx *= 2.5; p.vy *= 2.5; p.life = kind === 'leaf' ? 0.8 : 0.45; p.size = 1.6; p.rot = Math.random() * 6.28; break;
       case 'debris': p.vz = 2 + Math.random() * 1.5; p.vx *= 4; p.vy *= 4; p.life = 0.9; p.size = 1.5 + Math.random() * 1.5; p.rot = Math.random() * 6.28; break;
       case 'campfire': p.vz = 0.9 + Math.random() * 0.4; p.vx *= 0.15; p.vy *= 0.15; p.life = 0.55; p.size = 3 + Math.random() * 3; break;
+      case 'fireball': p.z = 0.15; p.vz = 0.5 + Math.random() * 0.4; p.vx *= 0.8; p.vy *= 0.8; p.life = 0.42 + Math.random() * 0.25; p.size = 12 + Math.random() * 9; break;
+      case 'ember': p.vz = 2.2 + Math.random() * 2; p.vx *= 5; p.vy *= 5; p.life = 0.5 + Math.random() * 0.5; p.size = 1; break;
     }
     if (this.particles.length >= 1500) return null;
     this.particles.push(p);
@@ -396,7 +409,7 @@ export class Renderer {
       const p = ps[i];
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
       const k = p.kind;
-      if (k === 'spark' || k === 'chip' || k === 'gold' || k === 'grit' || k === 'shard' || k === 'debris') p.vz -= 6 * dt;
+      if (k === 'spark' || k === 'chip' || k === 'gold' || k === 'grit' || k === 'shard' || k === 'debris' || k === 'ember') p.vz -= 6 * dt;
       else if (k === 'leaf') { p.vz -= 3 * dt; if (p.vz < -0.4) p.vz = -0.4; p.vx = Math.sin((this.time - p.t0) * 9 + p.rot) * 0.5; }
       if (this.time - p.t0 > p.life || p.z < -0.05) ps.splice(i, 1);
     }
@@ -406,6 +419,8 @@ export class Renderer {
       // impact effects when heavy projectiles land
       if (s.p === 'cannonball' || s.p === 'shell' || s.p === 'boulder' || s.p === 'stone') {
         for (let i = 0; i < (s.p === 'stone' ? 2 : 6); i++) this.puff(s.tx, s.ty, 0.15, 'dust');
+        if (s.p !== 'stone') this.waves.push({ x: s.tx, y: s.ty, t0: t, d: 0.35, R: s.p === 'shell' ? 26 : 18 });
+        if (s.p === 'shell') { this.puff(s.tx, s.ty, 0.05, 'fireball'); for (let i = 0; i < 5; i++) this.puff(s.tx, s.ty, 0.05, 'ember'); }
         if (s.p !== 'stone') { for (let i = 0; i < 4; i++) this.puff(s.tx, s.ty, 0.1, 'debris'); this.addDecal({ k: 'scorch', x: s.tx, y: s.ty, r: s.p === 'shell' ? 0.35 : 0.25, life: 8, crater: true }); }
       }
     }
@@ -414,6 +429,7 @@ export class Renderer {
     this.texts = this.texts.filter(f => t - f.t0 < f.d);
     this.corpses = this.corpses.filter(c => t - c.t0 < 3);
     this.decals = this.decals.filter(d => t - d.t0 < d.life);
+    if (this.waves.length) this.waves = this.waves.filter(w => t - w.t0 < w.d);
   }
 
   // ---------------------------------------------------------- drawing
@@ -466,6 +482,7 @@ export class Renderer {
 
     // scorch marks, craters and rubble
     if (this.decals.length) this.drawDecals(ctx);
+    for (const w of this.waves) { const [wx, wy] = iso(w.x, w.y); shockwave(ctx, wx, wy, (this.time - w.t0) / w.d, w.R, this.themeName !== 'space'); }
     // ground decals: farms, selection rings, rally points, ghosts
     this.lastEnts = F.ents;
     const drawables = [];
@@ -486,6 +503,19 @@ export class Renderer {
       drawables.push({ d, e });
     }
     drawables.sort((a, b) => a.d - b.d);
+    // gather targets in view (resources, farms, wild animals), bucketed by
+    // tile: fallback for a gathering worker's tool when the snapshot has no
+    // work resource (e.wr) for it (e.g. units of other players)
+    this.gatherGrid = null;
+    for (const it of drawables) { const e = it.e; if (e && e.k === 0 && e.s === 4 && !e.wr && e.def && e.def.class === 'worker') { this.gatherGrid = new Map(); break; } }
+    if (this.gatherGrid) for (const it of drawables) {
+      const e = it.e;
+      if (!e) continue;
+      const tgt = e.k === 2 || (e.k === 1 && e.t === 'farm') || (e.k === 0 && e.o < 0 && e.def && e.def.class === 'animal');
+      if (!tgt) continue;
+      const key = (Math.floor(e.x) & 0xffff) | (Math.floor(e.y) << 16);
+      const b = this.gatherGrid.get(key); if (b) b.push(e); else this.gatherGrid.set(key, [e]);
+    }
     // selection rings (under everything)
     for (const it of drawables) {
       const e = it.e;
@@ -569,7 +599,7 @@ export class Renderer {
         ctx.drawImage(sp.canvas, ax - sp.ox, ay - sp.oy, sp.w, sp.h);
         if (stage < 3 && e.prog > 0 && Math.random() < dt * 2.5) this.puff(e.x + (Math.random() - 0.5) * s * 0.8, e.y + (Math.random() - 0.5) * s * 0.8, 0.1, 'dust');
         if (stage === 3) {
-          if (buildingAnimated(e.t, era)) { ctx.save(); ctx.translate(ax, ay); drawBuildingAnim(ctx, e.t, era, e.o, s, t); ctx.restore(); }
+          if (buildingAnimated(e.t, era) || sp0.flags && sp0.flags.length) { ctx.save(); ctx.translate(ax, ay); if (buildingAnimated(e.t, era)) drawBuildingAnim(ctx, e.t, era, e.o, s, t); drawBuildingFlags(ctx, sp0, t + (e.i || 0) * 0.37); ctx.restore(); }
           for (const p of smokePoints(e.t, era, s)) {
             if (Math.random() < dt * 4) { const pp = this.puff(e.x - s / 2 + p[0], e.y - s / 2 + p[1], 0, 'chimney'); if (pp) pp.z = p[2]; }
           }
@@ -583,28 +613,50 @@ export class Renderer {
         const walking = e.moving;
         const walk = walking ? (t * (def.speed || 1) * 1.6 + e.i * 0.37) % 1 : 0;
         const act = e.b ? (t * 1.6 + e.i * 0.21) % 1 : 0;
-        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t, moving: !!walking, res: e.r, state: e.s, lod });
+        // the load on the back follows the CARRIED resource (e.c amount, e.r
+        // type); the tool follows the gather target (e.wr = its resource + 1)
+        const carry = e.c > 0 ? (e.r || 0) : -1;
+        const res = def.class !== 'worker' ? undefined : e.wr ? e.wr - 1 : this.workRes(e, carry);
+        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry, id: e.i, t, moving: !!walking, res, state: e.s, lod });
         if (walking && !def.flying && !def.naval && def.class !== 'naval' && (def.class === 'mounted' || def.class === 'siege' || def.pop > 1 || def.class === 'animal') && Math.random() < dt * 7 && this.themeName !== 'space') this.puff(e.x - Math.cos(e.f || 0) * 0.25, e.y - Math.sin(e.f || 0) * 0.25, 0.12, 'kick');
       }
     }
-    // particles
+    // particles: soft pre-rendered puffs and additive glows
+    const SMOKE = [86, 84, 82], CHIM = [150, 148, 146], DUST = [164, 140, 104], GUN = [232, 230, 222], WSNOW = [236, 242, 252];
+    const FIRE = glowSprite([255, 112, 28]), EMB = glowSprite([255, 150, 50], 0.9);
     for (const p of this.particles) {
       const [sx, sy] = iso(p.x, p.y);
       const age = (t - p.t0) / p.life, py = sy - p.z * ZH;
+      const fin = age < 0.12 ? age / 0.12 : 1;
       switch (p.kind) {
-        case 'smoke': case 'chimney': ctx.fillStyle = `rgba(90,90,90,${0.35 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age * 1.5), 0, 7); ctx.fill(); break;
-        case 'dust': ctx.fillStyle = `rgba(150,128,96,${0.4 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age), 0, 7); ctx.fill(); break;
+        case 'smoke': stamp(ctx, puffSprite(SMOKE, p.v), sx, py, p.size * (1.25 + age * 1.9), 0.62 * (1 - age) * fin); break;
+        case 'chimney': stamp(ctx, puffSprite(CHIM, p.v), sx, py, p.size * (1.2 + age * 1.9), 0.5 * (1 - age) * fin); break;
+        case 'dust': stamp(ctx, puffSprite(this.themeName === 'winter' ? WSNOW : DUST, p.v), sx, py, p.size * (1.3 + age * 1.3), 0.62 * (1 - age) * fin); break;
+        case 'gunsmoke': stamp(ctx, puffSprite(GUN, p.v), sx, py, p.size * (1.3 + age * 2.6), 0.7 * (1 - age) * fin); break;
         case 'fire': case 'campfire': {
           const r0 = p.size * (1 - age * 0.5);
           ctx.globalCompositeOperation = 'lighter';
-          ctx.fillStyle = `rgba(255,110,30,${0.22 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, r0 * 1.7, 0, 7); ctx.fill();
-          ctx.fillStyle = `rgba(255,${(170 - age * 130) | 0},40,${0.7 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, r0, 0, 7); ctx.fill();
-          if (age < 0.5) { ctx.fillStyle = `rgba(255,240,180,${0.6 * (1 - age * 2)})`; ctx.beginPath(); ctx.arc(sx, py, r0 * 0.45, 0, 7); ctx.fill(); }
+          stamp(ctx, FIRE, sx, py, r0 * 1.9, 0.75 * (1 - age));
+          ctx.globalCompositeOperation = 'source-over';
+          break;
+        }
+        case 'fireball': {
+          // white-hot ball that swells, then cools into dark smoke
+          if (age < 0.6) { ctx.globalCompositeOperation = 'lighter'; stamp(ctx, FIRE, sx, py, p.size * (0.8 + age * 1.4), 1 - age / 0.6); ctx.globalCompositeOperation = 'source-over'; }
+          if (age > 0.3) stamp(ctx, puffSprite([52, 46, 42], p.v), sx, py - age * 4, p.size * (0.7 + age), 0.7 * (age - 0.3) / 0.7);
+          break;
+        }
+        case 'ember': {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1 - age;
+          const vx = (p.vx - p.vy) * TW / 2 * 0.03, vy = (p.vx + p.vy) * TH / 2 * 0.03 - p.vz * ZH * 0.03;
+          ctx.strokeStyle = age < 0.4 ? '#fff0b0' : '#ff9a3a'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(sx - vx, py - vy); ctx.lineTo(sx, py); ctx.stroke();
+          ctx.globalAlpha = 1;
+          stamp(ctx, EMB, sx, py, 2.6, 0.8 * (1 - age));
           ctx.globalCompositeOperation = 'source-over';
           break;
         }
         case 'spark': ctx.fillStyle = `rgba(255,240,180,${1 - age})`; ctx.fillRect(sx, py, 2, 2); break;
-        case 'gunsmoke': { const a = 0.45 * (1 - age); ctx.fillStyle = `rgba(225,222,215,${a})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age * 2.2), 0, 7); ctx.fill(); break; }
         case 'kick': ctx.fillStyle = this.themeName === 'winter' ? `rgba(240,245,255,${0.5 * (1 - age)})` : `rgba(160,136,100,${0.35 * (1 - age)})`; ctx.beginPath(); ctx.ellipse(sx, py, p.size * (1 + age * 1.5), p.size * (0.6 + age), 0, 0, 7); ctx.fill(); break;
         case 'chip': ctx.fillStyle = '#c8a070'; ctx.fillRect(sx, py, 2, 1.5); ctx.fillStyle = '#7a5030'; ctx.fillRect(sx + 0.5, py + 1, 1.5, 0.6); break;
         case 'gold': ctx.fillStyle = age < 0.5 && ((p.t0 * 10) | 0) % 2 ? '#fff6c0' : '#ffd84a'; ctx.fillRect(sx, py, 2, 2); break;
@@ -614,6 +666,7 @@ export class Renderer {
         case 'debris': { ctx.fillStyle = ((p.rot * 10) | 0) % 2 ? '#5a4a3a' : '#8a8478'; ctx.save(); ctx.translate(sx, py); ctx.rotate(p.rot + age * 12); ctx.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.66); ctx.restore(); break; }
       }
     }
+    ctx.globalAlpha = 1;
     // projectiles
     for (const s of this.shots) {
       const k = clamp((t - s.t0) / s.d, 0, 1);
@@ -640,9 +693,25 @@ export class Renderer {
           { const [gx, gy] = iso(x, y); const r0 = s.p === 'boulder' ? 4 : 2.5; ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(gx, gy, r0 * 1.2, r0 * 0.6, 0, 0, 7); ctx.fill(); }
           ctx.fillStyle = s.p === 'cannonball' ? '#222' : '#777'; ctx.beginPath(); ctx.arc(px, pyz, s.p === 'boulder' ? 4 : 2.5, 0, 7); ctx.fill();
           ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(px - 0.8, pyz - 0.8, s.p === 'boulder' ? 1.4 : 0.9, 0, 7); ctx.fill();
-          if (s.p !== 'stone' && Math.random() < 0.5) this.puff(x, y, 0, 'smoke'); break;
-        case 'bullet': case 'shell': ctx.strokeStyle = 'rgba(255,230,150,0.95)'; ctx.lineWidth = s.p === 'shell' ? 2.5 : 1.2; ctx.beginPath(); ctx.moveTo(qx, qyz); ctx.lineTo(px, pyz); ctx.stroke(); break;
-        case 'rocket': case 'missile': ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.arc(px, pyz, 2, 0, 7); ctx.fill(); this.puff(x, y, 0, Math.random() < 0.5 ? 'fire' : 'smoke'); break;
+          if (s.p !== 'stone' && Math.random() < 0.5) { const p = this.puff(x, y, 0, s.p === 'boulder' ? 'dust' : 'gunsmoke'); if (p) { p.z = zz; p.vz = 0.1; p.size *= 0.7; } } break;
+        case 'bullet': case 'shell': {
+          // tracer: fading streak with a hot head
+          const g = ctx.createLinearGradient(qx, qyz, px, pyz);
+          g.addColorStop(0, 'rgba(255,200,120,0)'); g.addColorStop(1, 'rgba(255,236,170,0.95)');
+          ctx.strokeStyle = g; ctx.lineWidth = s.p === 'shell' ? 2.4 : 1.2; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(qx - (px - qx), qyz - (pyz - qyz)); ctx.lineTo(px, pyz); ctx.stroke(); ctx.lineCap = 'butt';
+          ctx.globalCompositeOperation = 'lighter'; stamp(ctx, glowSprite([255, 190, 90]), px, pyz, s.p === 'shell' ? 6 : 3.5, 0.8); ctx.globalCompositeOperation = 'source-over';
+          if (s.p === 'shell' && Math.random() < 0.4) this.puff(x, y, 0, 'gunsmoke');
+          break;
+        }
+        case 'rocket': case 'missile': {
+          const dx = px - qx, dy = pyz - qyz, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+          ctx.globalCompositeOperation = 'lighter'; stamp(ctx, glowSprite([255, 130, 40]), px - ux * 4, pyz - uy * 4, 6 + Math.random() * 2, 0.9); ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = '#d8d8d4'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(px - ux * 4, pyz - uy * 4); ctx.lineTo(px + ux * 2, pyz + uy * 2); ctx.stroke(); ctx.lineCap = 'butt';
+          ctx.fillStyle = '#b83a2a'; ctx.beginPath(); ctx.arc(px + ux * 2, pyz + uy * 2, 1.1, 0, 7); ctx.fill();
+          const p = this.puff(x, y, 0, Math.random() < 0.3 ? 'fire' : 'gunsmoke'); if (p) { p.z = zz; p.vz = 0.1; }
+          break;
+        }
         case 'laser': case 'rail': case 'ion': {
           const [ax, ay] = iso(s.x, s.y), [bx, by] = iso(s.tx, s.ty);
           const col = s.p === 'ion' ? '170,140,255' : s.p === 'rail' ? '200,240,255' : '90,240,255';
@@ -770,6 +839,30 @@ export class Renderer {
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1) + 0.5, Math.min(b.y0, b.y1) + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
+  }
+
+  // resource index (0 food .. 4 energy) a gathering worker is working on,
+  // guessed from the nearest gather target in reach; falls back to the load
+  workRes(e, carry) {
+    const fb = carry >= 0 ? carry : -1;
+    if (e.s !== 4 || !this.gatherGrid) return fb;
+    let best = null, bd = 2.6;
+    const tx = Math.floor(e.x), ty = Math.floor(e.y);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const b = this.gatherGrid.get(((tx + dx) & 0xffff) | ((ty + dy) << 16));
+      if (!b) continue;
+      for (const r of b) {
+        let d;
+        if (r.k === 1) { const h = (r.def ? r.def.size : 2) / 2; d = Math.max(0, Math.abs(e.x - r.x) - h) + Math.max(0, Math.abs(e.y - r.y) - h); }
+        else d = Math.hypot(e.x - r.x, e.y - r.y);
+        if (d < bd) { bd = d; best = r; }
+      }
+    }
+    if (!best) return fb;
+    if (best.k !== 2) return 0; // farm or hunted animal
+    const rd = this.defs && this.defs.resources ? this.defs.resources[best.t] : null;
+    if (rd && rd.res != null) return rd.res;
+    return { tree: 1, berry: 0, carcass: 0, fish: 0, stone: 2, gold: 3, crystal: 4 }[best.t] ?? fb;
   }
 
   // scorch marks / craters (flat) and building rubble, fading out
@@ -1015,14 +1108,24 @@ export class Renderer {
 }
 
 function makeWaterPattern() {
-  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 64;
+  // 256x128 tile: light wave crests, darker troughs below them and sun glints
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
   const c = cv.getContext('2d');
-  c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth = 1;
-  for (let i = 0; i < 26; i++) {
-    const x = hash2(i, 1, 3) * 128, y = hash2(i, 2, 3) * 64, l = 6 + hash2(i, 3, 3) * 12;
-    c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + l / 2, y - 2, x + l, y); c.stroke();
+  c.lineCap = 'round';
+  for (let i = 0; i < 70; i++) {
+    const x = hash2(i, 1, 3) * 256, y = hash2(i, 2, 3) * 128, l = 6 + hash2(i, 3, 3) * 16, a = 0.25 + hash2(i, 4, 3) * 0.35;
+    for (const [dx, dy] of [[0, 0], [-256, 0], [0, -128], [-256, -128]]) {
+      if (x + dx + l < 0 || y + dy < -4) continue;
+      c.strokeStyle = `rgba(10,30,50,${a * 0.5})`; c.lineWidth = 1.2;
+      c.beginPath(); c.moveTo(x + dx + 1, y + dy + 1.6); c.quadraticCurveTo(x + dx + l / 2, y + dy - 0.2, x + dx + l - 1, y + dy + 1.6); c.stroke();
+      c.strokeStyle = `rgba(255,255,255,${a + 0.2})`; c.lineWidth = 0.9;
+      c.beginPath(); c.moveTo(x + dx, y + dy); c.quadraticCurveTo(x + dx + l / 2, y + dy - 2.2, x + dx + l, y + dy); c.stroke();
+    }
+  }
+  for (let i = 0; i < 40; i++) {
+    const x = hash2(i, 5, 3) * 256, y = hash2(i, 6, 3) * 128;
+    c.fillStyle = 'rgba(255,255,240,0.95)'; c.fillRect(x, y, hash2(i, 7, 3) > 0.6 ? 2 : 1, 1);
   }
   const ctx2 = document.createElement('canvas').getContext('2d');
   return ctx2.createPattern(cv, 'repeat');
 }
-

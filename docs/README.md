@@ -9,6 +9,8 @@ administration, diagnostics and anti-cheat.
 
 | Document | Contents |
 |---|---|
+| [manual.md](manual.md) | **User manual**: the objective, getting started, the screen, controls and every shortcut, economy, the seventeen ages and how to advance, military and counters, technologies and the tech tree, maps and sizes, tactics, playing with the right balance, difficulties, campaign, skirmish, multiplayer, saving, settings, editor (shown in-game: main menu *Manual & FAQ*, `F4`) |
+| [faq.md](faq.md) | **FAQ**: 100 common questions and answers in twelve sections (also in-game) |
 | [game-design.md](game-design.md) | the 17 ages, units per age and line, map types and naval units, buildings and their era names, technologies (incl. map techs), the 17 campaign levels, saved games, demo mode, counters, balance philosophy, six AI difficulties, scoring, controls |
 | [level-editor.md](level-editor.md) | using the editor, map type and fish, level file format, validation limits |
 

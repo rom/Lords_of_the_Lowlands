@@ -163,9 +163,10 @@ func (h *Hub) setupDemoLocked(r *Room) error {
 	diffs := []string{"normal", "hard", "super_hard", "insane"}
 	var setups []game.PlayerSetup
 	r.Slots = nil
+	first := rng.Intn(len(aiNames)) // consecutive names: never two of the same in one match
 	for i := 0; i < n; i++ {
 		d := diffs[rng.Intn(len(diffs))]
-		setups = append(setups, game.PlayerSetup{Name: aiName(i + rng.Intn(5)), Team: i + 1, AI: true, Difficulty: d})
+		setups = append(setups, game.PlayerSetup{Name: aiName(first + i), Team: i + 1, AI: true, Difficulty: d})
 		r.Slots = append(r.Slots, &Slot{Kind: SlotAI, Name: setups[i].Name, Team: i + 1, Diff: d, player: i})
 	}
 	g, err := game.NewGame(l, setups, rng.Int63())

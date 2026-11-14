@@ -32,7 +32,7 @@ flowchart LR
 1. `Tick++`, rebuild the spatial hash (`buildGrid`: 4×4-tile cells of units and buildings).
 2. AI players think once per second: `(Tick + index*3) % 10 == 0` (staggered).
 3. Every live entity in creation order (`g.order`): `stepUnit` or `stepBuilding`.
-4. `separate()` — push overlapping ground units apart (0.45 tiles, 0.7 if either has pop > 1; busy units are not pushed).
+4. `separate()` — soft collision: push overlapping ground units apart (0.45 tiles, 0.7 if either has pop > 1). Busy (working) units are never pushed; units walking along a path are never pushed either and pass through other walkers and busy units, while units standing in their way step aside. This keeps workers flowing in narrow lanes between trees and around crowded drop-offs (before, two workers meeting head-on shoved each other back indefinitely). A gather order remembers the resource kind, so a worker whose tree is felled by someone else moves on to the next tree of that kind; a worker that cannot reach its drop-off stops but keeps its load.
 5. `resolveHits()` — apply damage whose impact tick has arrived.
 6. Every 2nd tick: `updateVisibility()`.
 7. Every 10th tick: recompute population of every player and `checkVictory()`.
@@ -303,7 +303,7 @@ Every second (`think`) it runs four planners:
 
 | Planner | Behaviour |
 |---|---|
-| economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 35/25/10/18/12 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5th `think` (every 5 s) one worker moves from the most over-stocked to the scarcest resource; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
+| economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 42/20/8/20/10 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5th `think` (every 5 s) one worker moves from the most over-stocked to the scarcest resource; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
 | construction | houses when within 6 of the cap; drop-off camps when a resource is > 9 tiles from one; a fixed build plan (barracks, range, academy, stable, workshop, tower, generator, then second barracks/range/stable) gated by age and worker count; more farms when wild food runs out |
 | research | advance the age when it has ≥ `10 + age` workers and can pay; otherwise academy techs in the order gather → attack → armor → hp, keeping half the next age cost in reserve |
 | military | trains the best unit at every military building (≤ 2 queued). It keeps a standing army of `4 + age/3 + minutes/4` (capped at the attack size) and only then saves for the next age, unless the advance is already 60 % paid. Defends against visible enemies within 14 tiles of its town centre with every soldier not out on an attack. After `FirstAttack` minutes, when the army reaches the attack size (`AttackSize` + age/2, minus 1 per 3 minutes after minute 40, at least 6), it commits exactly those units as a **wave** (`AI.wave`), stages them at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; recruits wait at home for the next wave. When the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2. Once no enemy town centre is left, all soldiers join the wave (mop-up) |

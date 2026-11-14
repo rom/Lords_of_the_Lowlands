@@ -446,7 +446,7 @@ are the same on every size. Small maps mean early contact and rushes, large ones
 long build-ups, scouting and naval play. Hand-drawn custom levels keep their
 own size.
 
-- **Skirmish vs computer**: random map (theme, map type, size 56–120, water
+- **Skirmish vs computer**: random map (theme, map type, map size Mini 48 … Enormous 256, water
   amount, start/final age, 1–7 opponents, difficulty) or any campaign/custom
   map.
 - **Saved games** (registered players): *Save Game* in the in-game menu
