@@ -426,6 +426,19 @@ registered players; guests can play everything but are not recorded.
 
 ## Skirmish and multiplayer
 
+**Map size** can be chosen whenever a game is started — on the campaign screen
+(default: the chapter's own size), in skirmish (default Normal) and when
+creating a lobby battle:
+
+| Preset | Mini | Tiny | Small | Normal | Large | Very large | Huge | Enormous |
+|---|---|---|---|---|---|---|---|---|
+| Tiles per side | 48 | 64 | 80 | 112 | 144 | 176 | 208 | 256 |
+
+Resources and forests scale with the area; each player's starting resources
+are the same on every size. Small maps mean early contact and rushes, large ones
+long build-ups, scouting and naval play. Hand-drawn custom levels keep their
+own size.
+
 - **Skirmish vs computer**: random map (theme, map type, size 56–120, water
   amount, start/final age, 1–7 opponents, difficulty) or any campaign/custom
   map.

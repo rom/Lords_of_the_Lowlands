@@ -78,6 +78,7 @@ type roomSummary struct {
 	State   string `json:"state"`
 	Players int    `json:"players"`
 	Max     int    `json:"max"`
+	Size    int    `json:"size"` // map edge length in tiles
 	Open    int    `json:"open"`
 }
 
@@ -93,7 +94,7 @@ func (r *Room) summary() roomSummary {
 			open++
 		}
 	}
-	return roomSummary{r.ID, r.Name, r.Host, r.Level.Name, r.Level.ID, r.State, n, len(r.Slots), open}
+	return roomSummary{r.ID, r.Name, r.Host, r.Level.Name, r.Level.ID, r.State, n, len(r.Slots), r.Level.Width, open}
 }
 
 type roomView struct {
@@ -191,6 +192,11 @@ func (h *Hub) createRoom(c *Client, m *ClientMsg) {
 			return
 		}
 	}
+	l, err := levels.Resize(l, m.MapSize)
+	if err != nil {
+		c.errorMsg(err.Error())
+		return
+	}
 	r, err := h.newRoom(c, m.Name, l, 0, m.Diff)
 	if err != nil {
 		c.errorMsg(err.Error())
@@ -216,6 +222,11 @@ func (h *Hub) quickGame(c *Client, m *ClientMsg) {
 		}
 	} else if l, ok = h.s.findLevel(m.Level); !ok {
 		c.errorMsg("unknown level")
+		return
+	}
+	var err error
+	if l, err = levels.Resize(l, m.MapSize); err != nil {
+		c.errorMsg(err.Error())
 		return
 	}
 	opp := m.Opp

@@ -456,8 +456,8 @@ all are validated by `ParseClientMsg`.
 |---|---|---|---|
 | `ping` | — | `pong` reply | |
 | `chat` | `ch` (`global`\|`room`\|`team`\|`whisper`), `text`, `to` (whisper) | chat | text cleaned and cut to 300 runes, must be non-empty; `to` ≤ 32 bytes; 1 msg/s, burst 5 |
-| `create` | `name`, `level` or `skirmish`, `diff` | create a lobby room (you are host) | name cleaned to 48 runes (default `Battle`); `level` ≤ 64 bytes; skirmish rooms have 4 seats |
-| `quick` | `level` or `skirmish`, `opp`, `diff` | create and immediately start a game vs AI | `opp` 0..7 (0 = level default); skirmish players = `opp + 1` |
+| `create` | `name`, `level` or `skirmish`, `diff`, `mapSize` | create a lobby room (you are host) | name cleaned to 48 runes (default `Battle`); `level` ≤ 64 bytes; skirmish rooms have 4 seats |
+| `quick` | `level` or `skirmish`, `opp`, `diff`, `mapSize` | create and immediately start a game vs AI | `opp` 0..7 (0 = level default); skirmish players = `opp + 1` |
 | `join` | `room` | take the first open seat (also reserved seats of a restored game) | `room` ≤ 32 bytes; lobby state only (demo rooms cannot be joined) |
 | `leave` | — | leave the room; resigns if the game is running; ends a demo | |
 | `slot` | `slot`, `kind` (`open`\|`closed`\|`ai`), `team`, `diff` | host edits a seat | `slot` 0..7, `team` 0..8 |
@@ -473,6 +473,15 @@ all are validated by `ParseClientMsg`.
 `super_hard` or `insane`. `skirmish` is
 `{"theme","size","startAge","maxAge","seed","water","mapType"}` (size 0..256,
 ages 0..16, map type as for `/api/generate`).
+
+`mapSize` picks a size preset and overrides `size` and the level's own size:
+`mini` 48, `tiny` 64, `small` 80, `normal` 112, `large` 144, `very_large` 176,
+`huge` 208, `enormous` 256 (tiles per side; also listed in `/api/defs` as
+`mapSizes`). Empty keeps the level's size. Campaign chapters and other
+generated levels can be resized; hand-drawn custom levels keep their size
+(`error`: *this map was drawn by hand and has a fixed size*); an unknown preset
+is rejected by the parser. Lobby room summaries carry the map edge length as
+`size`.
 
 Examples:
 

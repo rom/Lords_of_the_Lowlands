@@ -57,6 +57,7 @@
     <div class="campaign-grid" id="campgrid"></div>
     <div class="row">
       <label>Difficulty <select id="campdiff" class="diffsel" data-default="Level default"></select></label>
+      <label>Map size <select id="campsize" class="sizesel" data-default="Chapter default"></select></label>
       <button class="btn" data-go="menu">Back</button>
     </div>
   </section>
@@ -67,7 +68,7 @@
       <label>Map <select id="skmap"><option value="random">Random map</option></select></label>
       <label>Theme <select id="sktheme"></select></label>
       <label>Map type <select id="skmaptype"></select></label>
-      <label>Size <select id="sksize"><option value="80">Small</option><option value="112" selected>Medium</option><option value="144">Large</option><option value="192">Huge</option><option value="256">Giant</option></select></label>
+      <label>Map size <select id="sksize" class="sizesel"></select></label>
       <label>Water <input id="skwater" type="range" min="0" max="100" value="30"></label>
       <label>Start age <select id="skstart"></select></label>
       <label>Final age <select id="skmax"></select></label>
@@ -85,6 +86,7 @@
         <div id="roomlist" class="list"></div>
         <div class="row">
           <select id="newlevel"></select>
+          <select id="newsize" class="sizesel" data-default="Map default" title="Map size"></select>
           <input id="newname" placeholder="Battle name" maxlength="48">
           <button class="btn primary" id="create">Create</button>
         </div>

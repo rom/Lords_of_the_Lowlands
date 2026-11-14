@@ -688,3 +688,16 @@ func carve(t []byte, w, h int, a, b Point, r *rand.Rand) {
 		}
 	}
 }
+
+// MapSize is a named map-size preset the player can pick when starting a game.
+type MapSize struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Tiles int    `json:"tiles"`
+}
+
+// MapSizes lists the presets from smallest to largest.
+var MapSizes = []MapSize{
+	{"mini", "Mini", 48}, {"tiny", "Tiny", 64}, {"small", "Small", 80}, {"normal", "Normal", 112},
+	{"large", "Large", 144}, {"very_large", "Very large", 176}, {"huge", "Huge", 208}, {"enormous", "Enormous", 256},
+}

@@ -20,6 +20,8 @@ effect and piece of music is generated procedurally at runtime.
 - **17-chapter campaign** (≥ 15 levels as required). Each chapter starts in one age and lets you advance to
   the next, with conquest, survival and "advance first" objectives, on temperate, desert, winter, tropical,
   lunar, Martian and deep-space maps.
+- **Eight map sizes** — mini (48×48) to enormous (256×256), selectable for campaign chapters,
+  skirmish and lobby battles.
 - **Six map types** — inland, coastal, riverland, lakes, desert and highland. They change the terrain, the
   farm yield (desert 60 %, riverland 115 %) and the tech tree (irrigation, qanats, fishing nets, navigation,
   steam ships, deep mining, terrace farming, caravans).

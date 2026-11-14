@@ -1,6 +1,7 @@
 package levels
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rom/lords_of_the_lowlands/internal/game"
@@ -58,5 +59,45 @@ func TestSkirmish(t *testing.T) {
 	}
 	if _, err := Skirmish(SkirmishOptions{Size: 5000}); err == nil {
 		t.Fatal("bad size")
+	}
+}
+
+func TestMapSizePresets(t *testing.T) {
+	if n, ok := SizeTiles(""); !ok || n != 0 {
+		t.Fatal("empty size must keep the level size")
+	}
+	if _, ok := SizeTiles("gigantic"); ok {
+		t.Fatal("unknown preset accepted")
+	}
+	camp := Campaign()[0]
+	for _, z := range game.MapSizes {
+		for _, players := range []int{2, 4, 8} {
+			l, err := Skirmish(SkirmishOptions{Theme: "temperate", Players: players, Seed: 9, MapType: "coastal"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l, err = Resize(l, z.ID); err != nil {
+				t.Fatalf("%s: %v", z.ID, err)
+			}
+			m := l.Materialize(players)
+			if m.Width != z.Tiles || len(m.Starts) < players {
+				t.Fatalf("%s/%d players: %dx%d starts=%d", z.ID, players, m.Width, m.Height, len(m.Starts))
+			}
+		}
+		r, err := Resize(camp, z.ID)
+		if err != nil || r.Width != z.Tiles || r.ID != camp.ID {
+			t.Fatalf("campaign resize %s: %v", z.ID, err)
+		}
+	}
+	if camp.Width == game.MapSizes[0].Tiles {
+		t.Fatal("resizing must not modify the built-in level")
+	}
+	fixed := *camp
+	fixed.Tiles = strings.Repeat("0", camp.Width*camp.Height)
+	if _, err := Resize(&fixed, "huge"); err == nil {
+		t.Fatal("hand-made map resized")
+	}
+	if same, err := Resize(&fixed, ""); err != nil || same != &fixed {
+		t.Fatal("default size must return the level unchanged")
 	}
 }

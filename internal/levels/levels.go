@@ -3,6 +3,7 @@
 package levels
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/rom/lords_of_the_lowlands/internal/game"
@@ -136,4 +137,39 @@ func Skirmish(o SkirmishOptions) (*game.Level, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// SizeTiles returns the edge length of a preset ("" and "default" mean
+// "keep the level's own size" and return 0).
+func SizeTiles(id string) (int, bool) {
+	if id == "" || id == "default" {
+		return 0, true
+	}
+	for _, s := range game.MapSizes {
+		if s.ID == id {
+			return s.Tiles, true
+		}
+	}
+	return 0, false
+}
+
+// Resize returns a copy of a generated level with a different map size.
+// Hand-made levels (with fixed tiles) keep their size and are rejected.
+func Resize(l *game.Level, id string) (*game.Level, error) {
+	n, ok := SizeTiles(id)
+	if !ok {
+		return nil, fmt.Errorf("unknown map size %q", id)
+	}
+	if n == 0 || (l.Width == n && l.Height == n) {
+		return l, nil
+	}
+	if l.Tiles != "" || l.Gen == nil {
+		return nil, errors.New("this map was drawn by hand and has a fixed size")
+	}
+	c := *l
+	c.Width, c.Height = n, n
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
