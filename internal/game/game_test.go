@@ -895,3 +895,41 @@ func TestProjectileForAndValue(t *testing.T) {
 		t.Fatal("resource size/class")
 	}
 }
+
+// TestAIRebalanceAllSlots checks that the periodic worker rebalance runs for
+// AI players in every slot, not only slot 0 (whose think ticks happen to line
+// up with multiples of 50).
+func TestAIRebalanceAllSlots(t *testing.T) {
+	l := flatLevel(Object{"tree", 22, 22}, Object{"tree", 22, 23}, Object{"tree", 23, 22},
+		Object{"tree", 9, 9}, Object{"tree", 9, 10}, Object{"tree", 10, 9},
+		Object{"berry", 28, 21}, Object{"berry", 3, 10})
+	g, err := NewGame(l, []PlayerSetup{{Name: "A", Team: 1, AI: true, Difficulty: "normal"}, {Name: "B", Team: 2, AI: true, Difficulty: "normal"}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := g.Players[1]
+	// lots of wood, nothing else: nothing to train, everyone chopping wood
+	p.Res = Res{0, 5000, 0, 0, 0}
+	trees := []*Entity{}
+	for _, e := range g.Ents {
+		if e.Kind == KResource && e.R.Res == Wood && e.X > 16 {
+			trees = append(trees, e)
+		}
+	}
+	ws := own(g, 1, ClassWorker)
+	if len(ws) == 0 || len(trees) == 0 {
+		t.Fatal("setup")
+	}
+	orig := map[int]bool{}
+	for i, w := range ws {
+		g.orderGather(w, trees[i%len(trees)])
+		orig[w.ID] = true
+	}
+	steps(g, 100) // 10 game seconds
+	for _, w := range own(g, 1, ClassWorker) {
+		if r := g.Ents[w.Target]; orig[w.ID] && w.Order == OGather && r != nil && r.Kind == KResource && r.R.Res == Food {
+			return
+		}
+	}
+	t.Fatal("AI in slot 1 never moved a worker off its over-stocked wood")
+}
