@@ -371,6 +371,9 @@ func TestLevelsAPI(t *testing.T) {
 	if code != 200 || len(gen["starts"].([]interface{})) != 3 {
 		t.Fatal("generate", code, gen)
 	}
+	if code, gen, _ := c.do("POST", "/api/generate", map[string]interface{}{"theme": "temperate", "size": 48, "seed": 5, "mapType": "coastal"}, nil); code != 200 || gen["mapType"] != "coastal" {
+		t.Fatal("generate map type", code, gen["mapType"])
+	}
 	if code, _, _ := c.do("POST", "/api/generate", map[string]interface{}{"theme": "lava"}, nil); code != 400 {
 		t.Fatal("generate bad theme")
 	}

@@ -345,14 +345,14 @@ listed:
 | Terrace Farming | 2 | 150F 200W 50S | +25 % farm yield | highland |
 | Fishing Nets | 2 | 100F 150W 50G | +30 % fishing rate | coastal, riverland, lakes |
 | Deep Mining | 3 | 150F 200W 100G | +30 % stone and gold mining | highland, desert |
-| Navigation | 4 | 200F 250W 150G | warships +20 % (hit points) | coastal, riverland, lakes |
+| Navigation | 4 | 200F 250W 150G | +20 % warship attack and hit points | coastal, riverland, lakes |
 | Caravans | 4 | 200F 100W 150G | +10 % gather rate (all resources) | desert, inland |
 | Qanats | 5 | 300F 200W 200S 100G | +40 % farm yield | desert |
-| Steam Ships | 10 | 300F 300W 300G 100E | warships +25 % (hit points) | coastal, riverland, lakes |
+| Steam Ships | 10 | 300F 300W 300G 100E | +25 % warship attack and hit points | coastal, riverland, lakes |
 
 Farm-yield techs affect farms built afterwards. Navigation and Steam Ships
-are described as "+attack and hit points" in game, but currently raise hit
-points only.
+apply to every boat you own, including ones already afloat: warships hit
+harder and all boats (warships and fishing boats) gain hit points.
 
 Names and costs (F/W/S/G/E):
 
