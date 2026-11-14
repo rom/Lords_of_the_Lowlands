@@ -1,0 +1,102 @@
+policy_module(lotl, 1.0.0)
+
+########################################
+#
+# Declarations
+#
+# lotl_t          - the lotl-server process domain
+# lotl_exec_t     - entrypoint: /usr/local/bin/lotl-server
+# lotl_var_lib_t  - data directory /var/lib/lotl (accounts, scores, levels)
+# lotl_etc_t      - optional configuration / TLS material in /etc/lotl
+# lotl_port_t     - TCP port of the game (8080 by default, semanage port)
+#
+
+type lotl_t;
+type lotl_exec_t;
+init_daemon_domain(lotl_t, lotl_exec_t)
+
+type lotl_var_lib_t;
+files_type(lotl_var_lib_t)
+
+type lotl_etc_t;
+files_config_file(lotl_etc_t)
+
+type lotl_port_t;
+corenet_port(lotl_port_t)
+
+########################################
+#
+# lotl_t local policy
+#
+
+# No capabilities whatsoever. The server tries to drop its (already empty)
+# capability sets at start-up; PR_CAPBSET_DROP needs CAP_SETPCAP and fails
+# harmlessly, so keep the denial out of the audit log.
+dontaudit lotl_t self:capability { setpcap sys_admin net_admin };
+dontaudit lotl_t self:cap_userns { setpcap sys_admin net_admin };
+
+# Go runtime: signals between its own threads (AllThreadsSyscall uses
+# tgkill), scheduler queries, RLIMIT_CORE=0 / RLIMIT_NOFILE adjustment,
+# capget/capset (getcap/setcap) for clearing the capability sets.
+# Deliberately NOT granted: execmem, execstack, execheap, ptrace.
+allow lotl_t self:process { signal sigchld sigkill sigstop signull getsched setrlimit getcap setcap };
+allow lotl_t self:fifo_file rw_fifo_file_perms;
+allow lotl_t self:unix_stream_socket create_stream_socket_perms;
+
+# --- network: listen and accept on the game port, nothing else ----------
+# create_stream_socket_perms includes listen and accept.
+allow lotl_t self:tcp_socket create_stream_socket_perms;
+corenet_tcp_bind_generic_node(lotl_t)
+allow lotl_t lotl_port_t:tcp_socket name_bind;
+corenet_tcp_sendrecv_generic_if(lotl_t)
+corenet_tcp_sendrecv_generic_node(lotl_t)
+# Intentionally absent: any name_connect rule. The server never makes
+# outbound connections (Landlock enforces the same in-process).
+
+# --- data directory --------------------------------------------------------
+# Atomic writes: create a temp file, write, fsync, rename over the target.
+manage_dirs_pattern(lotl_t, lotl_var_lib_t, lotl_var_lib_t)
+manage_files_pattern(lotl_t, lotl_var_lib_t, lotl_var_lib_t)
+files_var_lib_filetrans(lotl_t, lotl_var_lib_t, dir)
+files_search_var_lib(lotl_t)
+
+# --- configuration / TLS key (read once at start-up) -----------------------
+read_files_pattern(lotl_t, lotl_etc_t, lotl_etc_t)
+list_dirs_pattern(lotl_t, lotl_etc_t, lotl_etc_t)
+files_search_etc(lotl_t)
+
+# --- runtime environment ---------------------------------------------------
+# /sys/kernel/mm/transparent_hugepage/* is read by the Go runtime.
+dev_read_sysfs(lotl_t)
+kernel_read_system_state(lotl_t)
+# stdout/stderr are connected to the journal by systemd (JSON slog lines).
+logging_send_syslog_msg(lotl_t)
+init_use_fds(lotl_t)
+# Static binary: no shared libraries, but allow locale data reads quietly.
+miscfiles_read_localization(lotl_t)
+
+########################################
+#
+# systemd (init_t) interaction
+#
+
+gen_require(`
+	type init_t;
+	class process2 { nnp_transition nosuid_transition };
+')
+
+# The unit sets NoNewPrivileges=yes; with the nnp_nosuid_transition policy
+# capability the init_t -> lotl_t exec transition must be explicitly allowed.
+allow init_t lotl_t:process2 { nnp_transition nosuid_transition };
+
+# Socket activation: systemd creates the listening socket with the label
+# of the service it activates (lotl_t) and binds it to lotl_port_t before
+# handing it over. Many base policies already allow init_t to bind any
+# port; these rules make the module self-contained.
+allow init_t lotl_port_t:tcp_socket name_bind;
+allow init_t lotl_t:tcp_socket { create bind listen setopt getopt getattr setattr read write };
+
+# StateDirectory=: systemd creates and chowns /var/lib/lotl (or
+# /var/lib/private/lotl with DynamicUser=yes) with the label from lotl.fc.
+manage_dirs_pattern(init_t, lotl_var_lib_t, lotl_var_lib_t)
+allow init_t lotl_var_lib_t:dir { relabelfrom relabelto setattr };

@@ -1,0 +1,8 @@
+/usr/local/bin/lotl-server	--	gen_context(system_u:object_r:lotl_exec_t,s0)
+/usr/bin/lotl-server		--	gen_context(system_u:object_r:lotl_exec_t,s0)
+
+/etc/lotl(/.*)?				gen_context(system_u:object_r:lotl_etc_t,s0)
+
+/var/lib/lotl(/.*)?			gen_context(system_u:object_r:lotl_var_lib_t,s0)
+# DynamicUser=yes keeps the real directory below /var/lib/private.
+/var/lib/private/lotl(/.*)?		gen_context(system_u:object_r:lotl_var_lib_t,s0)

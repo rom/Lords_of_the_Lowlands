@@ -1,0 +1,110 @@
+## <summary>Lords of the Lowlands real-time strategy game server.</summary>
+
+########################################
+## <summary>
+##	Execute lotl-server in the lotl_t domain.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed to transition.
+##	</summary>
+## </param>
+#
+interface(`lotl_domtrans',`
+	gen_require(`
+		type lotl_t, lotl_exec_t;
+	')
+
+	corecmd_search_bin($1)
+	domtrans_pattern($1, lotl_exec_t, lotl_t)
+')
+
+########################################
+## <summary>
+##	Search the lotl data directory.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`lotl_search_lib',`
+	gen_require(`
+		type lotl_var_lib_t;
+	')
+
+	files_search_var_lib($1)
+	allow $1 lotl_var_lib_t:dir search_dir_perms;
+')
+
+########################################
+## <summary>
+##	Read lotl data files (e.g. for a backup agent).
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`lotl_read_lib_files',`
+	gen_require(`
+		type lotl_var_lib_t;
+	')
+
+	files_search_var_lib($1)
+	list_dirs_pattern($1, lotl_var_lib_t, lotl_var_lib_t)
+	read_files_pattern($1, lotl_var_lib_t, lotl_var_lib_t)
+')
+
+########################################
+## <summary>
+##	Create, read, write and delete lotl data files (e.g. for restore).
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`lotl_manage_lib_files',`
+	gen_require(`
+		type lotl_var_lib_t;
+	')
+
+	files_search_var_lib($1)
+	manage_dirs_pattern($1, lotl_var_lib_t, lotl_var_lib_t)
+	manage_files_pattern($1, lotl_var_lib_t, lotl_var_lib_t)
+')
+
+########################################
+## <summary>
+##	All of the rules required to administrate a lotl environment.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+## <param name="role">
+##	<summary>
+##	Role allowed access.
+##	</summary>
+## </param>
+## <rolecap/>
+#
+interface(`lotl_admin',`
+	gen_require(`
+		type lotl_t, lotl_var_lib_t, lotl_etc_t;
+	')
+
+	allow $1 lotl_t:process { signal_perms };
+	ps_process_pattern($1, lotl_t)
+
+	files_search_var_lib($1)
+	admin_pattern($1, lotl_var_lib_t)
+
+	files_search_etc($1)
+	admin_pattern($1, lotl_etc_t)
+')
