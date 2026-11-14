@@ -44,6 +44,7 @@ FUZZ_TARGETS = \
 	internal/game:FuzzApply \
 	internal/game:FuzzFog \
 	internal/game:FuzzCleanText \
+	internal/game:FuzzLoadGame \
 	internal/store:FuzzOpenCorruptFiles \
 	internal/store:FuzzValidName
 
