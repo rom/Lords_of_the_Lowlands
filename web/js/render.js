@@ -1,8 +1,10 @@
 // Isometric renderer: procedural terrain chunks, animated water, entities,
 // effects, fog of war and minimap.
 import { TW, TH, ZH, TEAM, iso, fbm, vnoise, hash2, clamp, shade } from './util.js';
+import { drawFlagCloth } from './art/kit.js';
 import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, drawBuildingFlags, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite, TREE_VARIANTS } from './sprites.js';
 import { decorateChunk } from './art/terrain.js';
+import { mountainSprite, hasMountainSprite } from './art/mountains.js';
 import { isFootUnit } from './art/units.js';
 import { puffSprite, glowSprite, stamp, shockwave } from './art/fx.js';
 
@@ -120,10 +122,11 @@ export class Renderer {
         break;
       }
       case T_MTN: {
-        const ridge = Math.abs(Math.sin(wx * 2.3 + n1 * 5)) * 0.25;
-        const k = 0.65 + n1 * 0.45 + n2 * 0.25 - ridge;
+        // gravelly talus under the rock sprites: lighter, speckled
+        const gr = hash2(Math.floor(wx * 24), Math.floor(wy * 24), 13);
+        const k = 0.92 + n1 * 0.22 + n2 * 0.14 + (gr > 0.8 ? 0.12 : gr < 0.2 ? -0.1 : 0);
         r *= k; g *= k; b *= k;
-        if (this.themeName === 'winter' && n1 > 0.55) { r = 235; g = 240; b = 245; }
+        if (this.themeName === 'winter' && n1 > 0.45) { r = 228 * k; g = 234 * k; b = 242 * k; }
         break;
       }
       case T_SHALLOW: { const k = 0.92 + n2 * 0.1 + Math.sin(wx * 5 + n1 * 4) * 0.03; r *= k; g *= k; b *= k; break; }
@@ -241,48 +244,39 @@ export class Renderer {
     return c;
   }
 
-  // pre-built rock sprites for mountain tiles
+  // mountain tiles, with a height class from the distance to the range's edge
+  // (edge tiles: low crags and scree; interior: tall peaks)
   buildRocks() {
     this.rocks = []; this.rockRows = [];
     const { w, h, tiles } = this;
+    const dep = new Uint8Array(w * h), q = [];
+    for (let i = 0; i < tiles.length; i++) if (tiles[i] === T_MTN) {
+      const x = i % w, y = (i / w) | 0;
+      let edge = x === 0 || y === 0 || x === w - 1 || y === h - 1;
+      for (let dy = -1; dy <= 1 && !edge; dy++) for (let dx = -1; dx <= 1; dx++) if (tiles[(y + dy) * w + x + dx] !== T_MTN) { edge = true; break; }
+      if (edge) { dep[i] = 1; q.push(i); }
+    }
+    for (let k = 0; k < q.length; k++) {
+      const i = q[k], x = i % w, y = (i / w) | 0;
+      if (dep[i] >= 3) continue;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const j = ny * w + nx; if (tiles[j] === T_MTN && !dep[j]) { dep[j] = dep[i] + 1; q.push(j); }
+      }
+    }
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      if (tiles[y * w + x] !== T_MTN) continue;
-      const r = { x: x + 0.5, y: y + 0.5, v: Math.floor(hash2(x, y, 7) * 6) };
+      const i = y * w + x;
+      if (tiles[i] !== T_MTN) continue;
+      const r = { x: x + 0.5, y: y + 0.5, v: Math.floor(hash2(x, y, 7) * 6), hc: Math.min(2, Math.max(0, (dep[i] || 3) - 1)) };
       this.rocks.push(r);
       (this.rockRows[y] || (this.rockRows[y] = [])).push(r);
     }
   }
 
-  rockSprite(v) {
-    this.rockCache = this.rockCache || {};
-    const key = this.themeName + v;
-    if (this.rockCache[key]) return this.rockCache[key];
-    const cv = document.createElement('canvas'); cv.width = 160; cv.height = 140;
-    const ctx = cv.getContext('2d'); ctx.scale(2, 2); ctx.translate(40, 56);
-    const base = this.th.t[T_MTN];
-    const snow = this.themeName === 'winter';
-    const peaks = [];
-    for (let i = 0; i < 5; i++) peaks.push({ x: (hash2(v, i, 1) - 0.5) * 32, hgt: 12 + hash2(v, i, 2) * 28, wd: 10 + hash2(v, i, 3) * 9, y: (hash2(v, i, 4) - 0.5) * 9 });
-    peaks.sort((a, b) => a.y - b.y);
-    for (const { x, hgt, wd, y } of peaks) {
-      const tx = x - wd * 0.25, ty = y - hgt;
-      // silhouette outline
-      ctx.fillStyle = 'rgba(20,18,16,0.7)';
-      ctx.beginPath(); ctx.moveTo(x - wd - 1, y + 7); ctx.lineTo(tx, ty - 1.2); ctx.lineTo(x + wd + 1, y + 7); ctx.lineTo(x, y + 9); ctx.closePath(); ctx.fill();
-      // lit (left) and shadow (right) faces with a mid facet
-      ctx.fillStyle = shade(base, 1.08);
-      ctx.beginPath(); ctx.moveTo(x - wd, y + 6); ctx.lineTo(tx, ty); ctx.lineTo(x - wd * 0.15, y + 8); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = shade(base, 0.86);
-      ctx.beginPath(); ctx.moveTo(x - wd * 0.15, y + 8); ctx.lineTo(tx, ty); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(x + wd * 0.4, y + 7.5); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = shade(base, 0.58);
-      ctx.beginPath(); ctx.moveTo(x + wd * 0.4, y + 7.5); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(tx, ty); ctx.lineTo(x + wd, y + 6); ctx.closePath(); ctx.fill();
-      // strata cracks
-      ctx.strokeStyle = shade(base, 0.5); ctx.lineWidth = 0.6;
-      for (let k = 1; k < 3; k++) { const f = k / 3; ctx.beginPath(); ctx.moveTo(x - wd * (1 - f) * 0.9, y + 6 - hgt * f * 0.9); ctx.lineTo(x - wd * 0.2 * (1 - f), y + 7 - hgt * f * 0.75); ctx.stroke(); }
-      if (snow || hgt > 32) { ctx.fillStyle = 'rgba(245,248,255,0.92)'; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - wd * 0.3, ty + hgt * 0.32); ctx.lineTo(tx - wd * 0.05, ty + hgt * 0.24); ctx.lineTo(tx + wd * 0.15, ty + hgt * 0.36); ctx.lineTo(tx + wd * 0.3, ty + hgt * 0.22); ctx.closePath(); ctx.fill(); }
-    }
-    this.rockCache[key] = cv;
-    return cv;
+  // builds at most two new mountain sprites per frame (null = not ready yet)
+  rockSprite(v, hc = 1) {
+    if (!hasMountainSprite(this.themeName, v, hc)) { if ((this.rockBuilt || 0) >= 2) return null; this.rockBuilt = (this.rockBuilt || 0) + 1; }
+    return mountainSprite(this.themeName, v, hc);
   }
 
   // ---------------------------------------------------------- camera
@@ -434,7 +428,7 @@ export class Renderer {
 
   // ---------------------------------------------------------- drawing
   draw(F, dt) {
-    this.time += dt;
+    this.time += dt; this.lastDt = dt; this.rockBuilt = F.fastBuild ? -999 : 0;
     this.stepEffects(dt);
     const ctx = this.ctx, z = this.zoom;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -517,42 +511,13 @@ export class Renderer {
       const b = this.gatherGrid.get(key); if (b) b.push(e); else this.gatherGrid.set(key, [e]);
     }
     // selection rings (under everything)
-    for (const it of drawables) {
+    if (F.sel && F.sel.size) for (const it of drawables) {
       const e = it.e;
-      if (!e || !F.sel || !F.sel.has(e.i)) continue;
-      const col = e.o === F.you ? '124,255,124' : e.o < 0 ? '255,255,255' : '255,106,90';
-      if (e.k === 1) {
-        const s = e.def.size, x0 = e.x - s / 2, y0 = e.y - s / 2, x1 = x0 + s, y1 = y0 + s;
-        ctx.fillStyle = `rgba(${col},0.08)`;
-        ctx.beginPath(); ctx.moveTo(...iso(x0, y0)); ctx.lineTo(...iso(x1, y0)); ctx.lineTo(...iso(x1, y1)); ctx.lineTo(...iso(x0, y1)); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = `rgba(${col},0.35)`; ctx.lineWidth = 4 / z; ctx.stroke();
-        // corner brackets
-        ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 2 / z; ctx.lineCap = 'round';
-        const L = Math.min(0.45, s * 0.3);
-        ctx.beginPath();
-        for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { ctx.moveTo(...iso(cx + dx * L, cy)); ctx.lineTo(...iso(cx, cy)); ctx.lineTo(...iso(cx, cy + dy * L)); }
-        ctx.stroke(); ctx.lineCap = 'butt';
-      } else {
-        const [sx, sy] = iso(e.x, e.y);
-        const r = e.def && (e.def.naval || e.def.class === 'naval') ? (e.def.pop > 1 ? 30 : 20) : e.def && (e.def.pop > 1 || e.def.class === 'siege' || e.def.class === 'mounted') ? 15 : 9;
-        ctx.strokeStyle = `rgba(${col},0.3)`; ctx.lineWidth = 4 / z;
-        ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, 0, 7); ctx.stroke();
-        ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.4 / z;
-        const rot = this.time * 0.8;
-        for (let k = 0; k < 3; k++) { const a0 = rot + k * 2.094; ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, a0, a0 + 1.6); ctx.stroke(); }
-      }
+      if (!e || !F.sel.has(e.i)) continue;
+      this.drawSelection(ctx, e, F, z);
     }
-    if (F.rally) {
-      const [sx, sy] = iso(F.rally[0], F.rally[1]);
-      ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy - 22); ctx.stroke();
-      ctx.fillStyle = TEAM[F.you] || '#fff'; ctx.beginPath(); ctx.moveTo(sx, sy - 22); ctx.lineTo(sx + 11, sy - 18); ctx.lineTo(sx, sy - 14); ctx.fill();
-    }
-    if (F.marker && this.time - F.marker.t < 0.6) {
-      const k = (this.time - F.marker.t) / 0.6;
-      const [sx, sy] = iso(F.marker.x, F.marker.y);
-      ctx.strokeStyle = F.marker.c || '#7cff7c'; ctx.globalAlpha = 1 - k; ctx.lineWidth = 2 / z;
-      ctx.beginPath(); ctx.ellipse(sx, sy, 14 * (1 - k * 0.6), 7 * (1 - k * 0.6), 0, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
-    }
+    if (F.rally) this.drawRally(ctx, F, drawables);
+    if (F.marker && this.time - F.marker.t < 0.7) this.drawMarker(ctx, F.marker);
 
     // entities; level of detail drops when zoomed out or crowded
     const t = this.time;
@@ -562,7 +527,8 @@ export class Renderer {
     for (const it of drawables) {
       if (it.rock) {
         const [sx, sy] = iso(it.rock.x, it.rock.y);
-        ctx.drawImage(this.rockSprite(it.rock.v), sx - 40, sy - 56, 80, 70);
+        const m = this.rockSprite(it.rock.v, it.rock.hc);
+        if (m) ctx.drawImage(m.canvas, sx - m.ox, sy - m.oy, m.w, m.h);
         continue;
       }
       if (it.corpse) { this.drawCorpse(ctx, it.corpse, t); continue; }
@@ -798,29 +764,18 @@ export class Renderer {
       ctx.restore();
     }
     // health bars & labels on top of fog
+    this.hpSeen = (this.hpSeen || 0) + 1;
     for (const it of drawables) {
       const e = it.e;
       if (!e || e.k === 2) continue;
+      const fx = this.hpTrack(e);
       const selected = F.sel && F.sel.has(e.i);
-      if (!selected && !(e.hp < 0.999 && e.k === 0) && !(e.k === 1 && e.hp < 0.999 && e.prog === 0)) continue;
-      if (e.k === 1 && !selected && e.hp > 0.7) continue;
-      let [sx, sy] = iso(e.x, e.y);
-      let w = 22, off = 30;
-      if (e.k === 1) { w = 40 + e.def.size * 6; off = 30 + e.def.size * 22; }
-      else if (e.def && e.def.flying) off = 60;
-      else if (e.def && (e.def.class === 'mounted' || e.def.class === 'siege')) off = 38;
-      else if (e.def && (e.def.naval || e.def.class === 'naval')) off = e.def.pop > 1 ? 62 : 36;
-      const bh = e.k === 1 ? 5 : 4, x0 = Math.round(sx - w / 2), y0 = Math.round(sy - off);
-      ctx.fillStyle = 'rgba(10,8,6,0.85)'; ctx.fillRect(x0 - 1.5, y0 - 1.5, w + 3, bh + 3);
-      ctx.fillStyle = 'rgba(60,20,16,0.9)'; ctx.fillRect(x0, y0, w, bh);
-      const hp = clamp(e.hp, 0, 1), hc = hp > 0.5 ? ['#7af07a', '#2a9a36'] : hp > 0.25 ? ['#ffe070', '#c89a18'] : ['#ff8060', '#b82a1e'];
-      const hg = ctx.createLinearGradient(0, y0, 0, y0 + bh); hg.addColorStop(0, hc[0]); hg.addColorStop(1, hc[1]);
-      ctx.fillStyle = hg; ctx.fillRect(x0, y0, w * hp, bh);
-      ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(x0, y0, w * hp, 1);
-      if (w > 30) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; for (let k = 1; k < 10; k++) ctx.fillRect(x0 + Math.round(w * k / 10), y0, 1, bh); }
-      if (e.o >= 0) { ctx.fillStyle = TEAM[e.o] || '#888'; ctx.fillRect(x0 - 1.5, y0 - 1.5, 2.5, bh + 3); }
-      if (e.k === 1 && e.prog > 0 && e.prog < 1) { ctx.fillStyle = 'rgba(10,8,6,0.85)'; ctx.fillRect(x0 - 1.5, y0 + bh + 1, w + 3, 4); ctx.fillStyle = '#5aa0ff'; ctx.fillRect(x0, y0 + bh + 2, w * e.prog, 2); }
+      const flashing = fx && t - fx.ft < 0.6;
+      if (!selected && !flashing && !(e.hp < 0.999 && e.k === 0) && !(e.k === 1 && e.hp < 0.999 && e.prog === 0)) continue;
+      if (e.k === 1 && !selected && !flashing && e.hp > 0.7) continue;
+      this.drawHealthBar(ctx, e, fx, t);
     }
+    if (this.hpSeen % 300 === 0 && this.hpFx) for (const [k, v] of this.hpFx) if (this.hpSeen - v.seen > 120) this.hpFx.delete(k);
     for (const f of this.texts) {
       const k = (t - f.t0) / f.d;
       const [px, py] = iso(f.x, f.y);
@@ -839,6 +794,149 @@ export class Renderer {
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1) + 0.5, Math.min(b.y0, b.y1) + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
+  }
+
+  // per-entity health history: damage flash and a trailing "lost" segment
+  hpTrack(e) {
+    if (e.i == null) return null;
+    const m = this.hpFx || (this.hpFx = new Map());
+    let v = m.get(e.i);
+    const hp = clamp(e.hp, 0, 1), t = this.time;
+    if (!v) { v = { hp, lag: hp, ft: -9, seen: this.hpSeen }; m.set(e.i, v); return v; }
+    v.seen = this.hpSeen;
+    if (hp < v.hp - 0.004) { v.ft = t; if (v.lag < v.hp) v.lag = v.hp; }
+    v.hp = hp;
+    // the lost chunk lingers briefly, then drains towards the current value
+    if (v.lag > hp) { if (t - v.ft > 0.35) v.lag = Math.max(hp, v.lag - 0.9 * (this.lastDt || 0.016)); } else v.lag = hp;
+    return v;
+  }
+
+  // segmented health bar with a dark frame, team tab, damage flash and
+  // build-progress strip; drawn in world space above the entity
+  drawHealthBar(ctx, e, fx, t) {
+    let [sx, sy] = iso(e.x, e.y);
+    let w = 24, off = 30;
+    if (e.k === 1) { w = 40 + e.def.size * 6; off = 30 + e.def.size * 22; }
+    else if (e.def && e.def.flying) off = 60;
+    else if (e.def && (e.def.class === 'mounted' || e.def.class === 'siege')) { off = 38; w = 28; }
+    else if (e.def && (e.def.naval || e.def.class === 'naval')) { off = e.def.pop > 1 ? 62 : 36; w = 30; }
+    const bh = e.k === 1 ? 5 : 4, x0 = Math.round(sx - w / 2), y0 = Math.round(sy - off);
+    const hp = clamp(e.hp, 0, 1);
+    // frame: soft drop shadow, dark rounded border, recessed trough
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; rrect(ctx, x0 - 1.5, y0 - 0.5, w + 4, bh + 4, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(14,11,8,0.92)'; rrect(ctx, x0 - 2, y0 - 2, w + 4, bh + 4, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(52,22,18,0.95)'; ctx.fillRect(x0, y0, w, bh);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(x0, y0, w, 1);
+    // trailing damage segment
+    if (fx && fx.lag > hp + 0.002) { ctx.fillStyle = t - fx.ft < 0.35 ? '#fff4d8' : '#f0a050'; ctx.fillRect(x0 + w * hp, y0, w * (fx.lag - hp), bh); }
+    const hc = hp > 0.5 ? ['#a2f58a', '#54c84a', '#2a8a30'] : hp > 0.25 ? ['#ffe890', '#f0c030', '#b08010'] : ['#ffa080', '#ee4a30', '#a01c14'];
+    const hg = ctx.createLinearGradient(0, y0, 0, y0 + bh); hg.addColorStop(0, hc[0]); hg.addColorStop(0.45, hc[1]); hg.addColorStop(1, hc[2]);
+    ctx.fillStyle = hg; ctx.fillRect(x0, y0, w * hp, bh);
+    ctx.fillStyle = 'rgba(255,255,255,0.38)'; ctx.fillRect(x0, y0, w * hp, 1);
+    // segment notches (one per ~10% on buildings, ~25% on units)
+    const nseg = e.k === 1 ? 10 : w > 26 ? 5 : 4;
+    ctx.fillStyle = 'rgba(10,8,6,0.55)';
+    for (let k = 1; k < nseg; k++) ctx.fillRect(x0 + Math.round(w * k / nseg), y0, 1, bh);
+    // damage flash: brief white overlay and a pulse of the frame
+    if (fx) { const fa = 1 - (t - fx.ft) / 0.25; if (fa > 0) { ctx.fillStyle = `rgba(255,255,255,${0.55 * fa})`; ctx.fillRect(x0, y0, w * Math.max(hp, fx.lag), bh); ctx.strokeStyle = `rgba(255,90,60,${0.8 * fa})`; ctx.lineWidth = 1; rrect(ctx, x0 - 2.5, y0 - 2.5, w + 5, bh + 5, 2.5); ctx.stroke(); } }
+    if (e.o >= 0) { ctx.fillStyle = TEAM[e.o] || '#888'; ctx.fillRect(x0 - 2, y0 - 2, 3, bh + 4); ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x0 - 2, y0 - 2, 3, 1); }
+    if (e.k === 1 && e.prog > 0 && e.prog < 1) {
+      ctx.fillStyle = 'rgba(14,11,8,0.92)'; rrect(ctx, x0 - 2, y0 + bh + 1.5, w + 4, 5, 1.5); ctx.fill();
+      const pg = ctx.createLinearGradient(0, y0 + bh + 2.5, 0, y0 + bh + 5.5); pg.addColorStop(0, '#9ad0ff'); pg.addColorStop(1, '#3a7ad8');
+      ctx.fillStyle = pg; ctx.fillRect(x0, y0 + bh + 2.5, w * e.prog, 3);
+    }
+  }
+
+  // selection: soft team-tinted ground glow, dark under-ring and a crisp
+  // relation-coloured ring (green own, red hostile, white neutral)
+  drawSelection(ctx, e, F, z) {
+    const col = e.o === F.you ? '124,255,124' : e.o < 0 ? '240,240,230' : '255,106,90';
+    const tc = e.o >= 0 ? hexRgb(TEAM[e.o] || '#888') : [230, 230, 220];
+    if (e.k === 1) {
+      const s = e.def.size, x0 = e.x - s / 2, y0 = e.y - s / 2, x1 = x0 + s, y1 = y0 + s;
+      const [cx, cy] = iso(e.x, e.y);
+      const R = s * TW * 0.62;
+      const g = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R);
+      g.addColorStop(0, `rgba(${tc[0]},${tc[1]},${tc[2]},0.05)`); g.addColorStop(0.75, `rgba(${tc[0]},${tc[1]},${tc[2]},0.18)`); g.addColorStop(1, `rgba(${tc[0]},${tc[1]},${tc[2]},0)`);
+      ctx.save(); ctx.beginPath(); ctx.moveTo(...iso(x0 - 0.15, y0 - 0.15)); ctx.lineTo(...iso(x1 + 0.15, y0 - 0.15)); ctx.lineTo(...iso(x1 + 0.15, y1 + 0.15)); ctx.lineTo(...iso(x0 - 0.15, y1 + 0.15)); ctx.closePath();
+      ctx.fillStyle = g; ctx.fill(); ctx.restore();
+      ctx.beginPath(); ctx.moveTo(...iso(x0, y0)); ctx.lineTo(...iso(x1, y0)); ctx.lineTo(...iso(x1, y1)); ctx.lineTo(...iso(x0, y1)); ctx.closePath();
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 3.2 / z; ctx.stroke();
+      ctx.strokeStyle = `rgba(${col},0.45)`; ctx.lineWidth = 1.2 / z; ctx.setLineDash([4 / z, 3 / z]); ctx.lineDashOffset = -this.time * 8 / z; ctx.stroke(); ctx.setLineDash([]);
+      // corner brackets
+      const L = Math.min(0.45, s * 0.3);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const [cx2, cy2, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { ctx.moveTo(...iso(cx2 + dx * L, cy2)); ctx.lineTo(...iso(cx2, cy2)); ctx.lineTo(...iso(cx2, cy2 + dy * L)); }
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 3.6 / z; ctx.stroke();
+      ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.8 / z; ctx.stroke(); ctx.lineCap = 'butt';
+      return;
+    }
+    const [sx, sy] = iso(e.x, e.y);
+    const r = e.def && (e.def.naval || e.def.class === 'naval') ? (e.def.pop > 1 ? 30 : 20) : e.def && (e.def.pop > 1 || e.def.class === 'siege' || e.def.class === 'mounted') ? 15 : 10;
+    const fl = e.def && e.def.flying;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 1.15);
+    g.addColorStop(0, `rgba(${tc[0]},${tc[1]},${tc[2]},0.32)`); g.addColorStop(0.7, `rgba(${tc[0]},${tc[1]},${tc[2]},0.2)`); g.addColorStop(1, `rgba(${tc[0]},${tc[1]},${tc[2]},0)`);
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(1, 0.5); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r * 1.15, 0, 7); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = 'rgba(0,0,0,0.38)'; ctx.lineWidth = 3 / z;
+    ctx.beginPath(); ctx.ellipse(sx, sy + 0.6, r, r * 0.5, 0, 0, 7); ctx.stroke();
+    ctx.strokeStyle = `rgba(${col},0.95)`; ctx.lineWidth = 1.4 / z;
+    ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, 0, 7); ctx.stroke();
+    // front highlight and slow rotating ticks
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 0.8 / z;
+    ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, 0.5, 2.6); ctx.stroke();
+    ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 2 / z;
+    const rot = this.time * 0.9;
+    for (let k = 0; k < 4; k++) { const a = rot + k * Math.PI / 2; ctx.beginPath(); ctx.ellipse(sx, sy, r + 2.2, (r + 2.2) * 0.5, 0, a, a + 0.28); ctx.stroke(); }
+    if (fl) { ctx.strokeStyle = `rgba(${col},0.35)`; ctx.lineWidth = 1 / z; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy - 50); ctx.stroke(); ctx.setLineDash([]); }
+  }
+
+  // rally point: dotted path from the selected building, a pulsing ground
+  // ring and a small pole with a waving team pennant
+  drawRally(ctx, F, drawables) {
+    const t = this.time;
+    const [sx, sy] = iso(F.rally[0], F.rally[1]);
+    let from = null;
+    if (F.sel && F.sel.size === 1) for (const it of drawables) if (it.e && it.e.k === 1 && F.sel.has(it.e.i)) { from = it.e; break; }
+    const tc = TEAM[F.you] || '#fff';
+    if (from) {
+      const [bx, by] = iso(from.x, from.y);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2.6; ctx.setLineDash([3, 5]); ctx.lineDashOffset = -t * 14;
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(sx, sy); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,248,220,0.85)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+    }
+    const ph = (t * 0.9) % 1;
+    ctx.strokeStyle = `rgba(255,248,220,${0.7 * (1 - ph)})`; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(sx, sy, 5 + ph * 12, (5 + ph * 12) * 0.5, 0, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(sx + 3, sy, 6, 2.4, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#2a1c10'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy - 26); ctx.stroke();
+    ctx.strokeStyle = '#8a6a40'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(sx - 0.4, sy); ctx.lineTo(sx - 0.4, sy - 26); ctx.stroke();
+    drawFlagCloth(ctx, sx, sy - 26, 13, F.you, t, 0.7);
+    ctx.fillStyle = '#e8c860'; ctx.beginPath(); ctx.arc(sx, sy - 27, 1.6, 0, 7); ctx.fill();
+    void tc;
+  }
+
+  // command acknowledgement: contracting double ring with four chevrons
+  drawMarker(ctx, m) {
+    const k = (this.time - m.t) / 0.7;
+    const [sx, sy] = iso(m.x, m.y);
+    const c = m.c || '#7cff7c', a = 1 - k;
+    const R = 16 * (1 - k * 0.55);
+    ctx.save();
+    ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#000'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(sx, sy + 0.6, R, R * 0.5, 0, 0, 7); ctx.stroke();
+    ctx.globalAlpha = a; ctx.strokeStyle = c; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(sx, sy, R, R * 0.5, 0, 0, 7); ctx.stroke();
+    ctx.globalAlpha = a * 0.6; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.ellipse(sx, sy, R * 0.5 + k * 6, (R * 0.5 + k * 6) * 0.5, 0, 0, 7); ctx.stroke();
+    ctx.globalAlpha = a; ctx.fillStyle = c; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 0.8;
+    const d = R + 3 + (1 - k) * 4;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const px = sx + dx * d, py = sy + dy * d * 0.5;
+      const ux = -dx, uy = -dy * 0.5, l = Math.hypot(ux, uy), nx = ux / l, ny = uy / l;
+      ctx.beginPath(); ctx.moveTo(px + nx * 4, py + ny * 4); ctx.lineTo(px - ny * 3, py + nx * 3); ctx.lineTo(px + ny * 3, py - nx * 3); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // resource index (0 food .. 4 energy) a gathering worker is working on,
@@ -1129,3 +1227,10 @@ function makeWaterPattern() {
   const ctx2 = document.createElement('canvas').getContext('2d');
   return ctx2.createPattern(cv, 'repeat');
 }
+
+function rrect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+const RGBC = new Map();
+function hexRgb(h) { let v = RGBC.get(h); if (!v) { const n = parseInt(h.slice(1), 16); v = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; RGBC.set(h, v); } return v; }

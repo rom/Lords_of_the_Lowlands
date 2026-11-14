@@ -126,6 +126,7 @@ export function planeOf(pts) {
 
 // ------------------------------------------------------------ materials
 function rnd(seed, i, j) { return hash2(i, j, seed); }
+const mixA = (A, B, t) => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t];
 
 // Paint a plane with a material. col: base colour. opts: {ao, edge, tint}
 export function paint(ctx, f, mat, col, opt = {}) {
@@ -135,11 +136,63 @@ export function paint(ctx, f, mat, col, opt = {}) {
   ctx.fillStyle = shade(c, L); ctx.fill();
   ctx.clip();
   texture(ctx, f, mat, c, L, opt);
+  if (mat && opt.weather !== false) weather(ctx, f, mat, opt);
   if (f.n[2] === 0 && opt.ao !== false) {
     for (let i = 0; i < 4; i++) { ctx.fillStyle = `rgba(20,14,8,${0.13 * (1 - i / 4)})`; ctx.beginPath(); f.quad(ctx, f.u0 - 1, i * 0.035, f.u1 + 1, (i + 1) * 0.035); ctx.fill(); }
   }
   ctx.restore();
   if (opt.edge !== false) { ctx.beginPath(); f.outline(ctx); ctx.strokeStyle = `rgba(20,14,10,${opt.edgeA ?? 0.35})`; ctx.lineWidth = 0.5; ctx.stroke(); }
+}
+
+// Weathering on textured planes: rain streaks and grime rising from the
+// ground on walls, moss / lichen on old masonry and roofs near the eaves.
+const MOSSY = { stone: 1, ashlar: 0.7, brick: 0.5, logs: 0.8, timber: 0.5, wattle: 0.6, planks: 0.5, hplanks: 0.5, adobe: 0.2, daub: 0.4, thatch: 0.9, reed: 0.9, slate: 0.8, shingle: 1, tiles: 0.6 };
+const CLEAN = { glass: 1, solar: 1, gravel: 1, paving: 1, earth: 1, field: 1, roofmetal: 0.5, panel: 0.5, metal: 0.4, hide: 0.6 };
+function weather(ctx, f, mat, opt) {
+  const sd = f.seed + 101, U0 = f.u0, U1 = f.u1, V = f.V, du = U1 - U0;
+  if (CLEAN[mat] === 1 || du <= 0) return;
+  const wall = f.n[2] === 0, roof = f.n[2] > 0.05 && f.n[2] < 0.97;
+  if (!wall && !roof) return;
+  const k = CLEAN[mat] ? 1 - CLEAN[mat] : 1;
+  if (wall) {
+    // grime and splash band rising from the ground
+    const A = f.p(U0, 0), B = f.p(U0, Math.min(V, 0.4));
+    const g = ctx.createLinearGradient(A[0], A[1], B[0], B[1]);
+    g.addColorStop(0, `rgba(48,36,24,${0.2 * k})`); g.addColorStop(1, 'rgba(48,36,24,0)');
+    ctx.fillStyle = g; ctx.beginPath(); f.quad(ctx, U0 - 0.1, -0.05, U1 + 0.1, Math.min(V, 0.4)); ctx.fill();
+    // rain streaks running down from the top (under sills, eaves)
+    const st = new Path2D(), st2 = new Path2D();
+    const n = Math.round(du * 5);
+    for (let i = 0; i < n; i++) {
+      const u = U0 + rnd(sd, i, 1) * du, l = V * (0.15 + rnd(sd, i, 2) * 0.45), v0 = V - rnd(sd, i, 3) * V * 0.4;
+      f.seg(rnd(sd, i, 4) < 0.5 ? st : st2, u, v0, u + (rnd(sd, i, 5) - 0.5) * 0.02, Math.max(0, v0 - l));
+    }
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = `rgba(30,24,20,${0.09 * k})`; ctx.lineWidth = 1.6; ctx.stroke(st);
+    ctx.strokeStyle = `rgba(30,24,20,${0.13 * k})`; ctx.lineWidth = 0.7; ctx.stroke(st2);
+    ctx.lineCap = 'butt';
+  }
+  const moss = (MOSSY[mat] || 0) * (opt.moss ?? 1);
+  if (moss > 0) {
+    // clumps hugging the bottom of walls / the eave end of roofs
+    const m1 = new Path2D(), m2 = new Path2D();
+    const n = Math.round(du * (roof ? 6 : 4) * moss);
+    for (let i = 0; i < n; i++) {
+      if (rnd(sd, i, 10) > 0.65) continue;
+      const u = U0 + rnd(sd, i, 11) * du, v = (roof ? V * 0.45 : 0.18) * Math.pow(rnd(sd, i, 12), 1.6);
+      const q = f.p(u, v), r = 0.8 + rnd(sd, i, 13) * (roof ? 2.4 : 1.8);
+      m1.moveTo(q[0] + r * 1.4, q[1]); m1.ellipse(q[0], q[1], r * 1.4, r * 0.7, 0, 0, 6.29);
+      m2.moveTo(q[0] + r * 0.6, q[1] - r * 0.2); m2.ellipse(q[0] - r * 0.2, q[1] - r * 0.2, r * 0.6, r * 0.32, 0, 0, 6.29);
+    }
+    ctx.fillStyle = mat === 'thatch' || mat === 'reed' ? 'rgba(70,84,40,0.32)' : 'rgba(74,98,44,0.34)'; ctx.fill(m1);
+    ctx.fillStyle = 'rgba(150,170,90,0.3)'; ctx.fill(m2);
+  }
+  if (roof && (mat === 'slate' || mat === 'tiles' || mat === 'shingle')) {
+    // pale lichen spots
+    const lc = new Path2D();
+    for (let i = 0; i < du * 6; i++) { const q = f.p(U0 + rnd(sd, i, 20) * du, rnd(sd, i, 21) * V); const r = 0.5 + rnd(sd, i, 22) * 0.9; lc.moveTo(q[0] + r, q[1]); lc.arc(q[0], q[1], r, 0, 6.29); }
+    ctx.fillStyle = 'rgba(214,206,150,0.3)'; ctx.fill(lc);
+  }
 }
 
 function speckle(ctx, f, c, L, n, k, seed) {
@@ -157,33 +210,52 @@ function texture(ctx, f, mat, c, L, opt) {
   switch (mat) {
     case 'stone': case 'marble': case 'ashlar': {
       const rh = mat === 'marble' ? 0.2 : mat === 'ashlar' ? 0.14 : 0.11;
-      ctx.fillStyle = shade(c, L * (mat === 'stone' ? 0.62 : 0.8)); ctx.fillRect(-999, -999, 1998, 1998);
+      ctx.fillStyle = shade(c, L * (mat === 'stone' ? 0.6 : 0.78)); ctx.fillRect(-999, -999, 1998, 1998);
+      const hi = new Path2D(), lo = new Path2D(), chip = new Path2D();
+      const warm = [158, 128, 96], cool = [104, 112, 128];
       let row = 0;
       for (let v = 0; v < V + rh; v += rh, row++) {
         let u = U0 - rnd(sd, row, 0) * 0.25, j = 0;
         while (u < U1) {
           const w = (mat === 'stone' ? 0.13 : 0.24) + rnd(sd, row, j + 1) * (mat === 'stone' ? 0.2 : 0.16);
-          const g = 0.012;
-          ctx.fillStyle = shade(c, L * (0.84 + rnd(sd + 5, row, j) * 0.3));
-          ctx.beginPath(); f.quad(ctx, u + g, v + g, u + w - g, v + rh - g); ctx.fill();
-          ctx.strokeStyle = shade(c, L * 1.18); ctx.lineWidth = 0.5;
-          ctx.beginPath(); f.seg(ctx, u + g, v + rh - g, u + w - g, v + rh - g); ctx.stroke();
+          const g = mat === 'stone' ? 0.014 : 0.01;
+          // rubble stones sag a little: uneven top edge
+          const top = v + rh - g - (mat === 'stone' ? rnd(sd + 9, row, j) * 0.025 : 0);
+          const r0 = rnd(sd + 5, row, j), tint = rnd(sd + 6, row, j);
+          let cc = c;
+          if (mat !== 'marble' && tint < 0.18) cc = mixA(c, warm, 0.22); else if (mat !== 'marble' && tint > 0.86) cc = mixA(c, cool, 0.2);
+          ctx.fillStyle = shade(cc, L * (0.82 + r0 * 0.32));
+          ctx.beginPath(); f.quad(ctx, u + g, v + g, u + w - g, top); ctx.fill();
+          f.seg(hi, u + g, top, u + w - g, top); f.seg(hi, u + g, v + g, u + g, top);
+          f.seg(lo, u + g, v + g, u + w - g, v + g);
+          if (r0 > 0.7) { const q = f.p(u + w * (0.2 + rnd(sd, row, j + 40) * 0.6), v + rh * (0.25 + rnd(sd, row, j + 41) * 0.5)); chip.rect(q[0], q[1], 0.9, 0.7); }
           u += w; j++;
         }
       }
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = shade(c, L * 1.22); ctx.stroke(hi);
+      ctx.strokeStyle = shade(c, L * 0.42); ctx.stroke(lo);
+      ctx.fillStyle = shade(c, L * 0.5); ctx.fill(chip);
       break;
     }
     case 'brick': {
       const rh = 0.062, bw = 0.15;
-      ctx.fillStyle = shade(mix(c, [205, 195, 175], 0.55), L); ctx.fillRect(-999, -999, 1998, 1998);
+      ctx.fillStyle = shade(mix(c, [205, 195, 175], 0.55), L * 0.92); ctx.fillRect(-999, -999, 1998, 1998);
+      const hi = new Path2D(), lo = new Path2D();
       let row = 0;
       for (let v = 0; v < V; v += rh, row++) {
         let j = 0;
         for (let u = U0 - (row % 2) * bw / 2; u < U1; u += bw, j++) {
-          ctx.fillStyle = shade(c, L * (0.86 + rnd(sd, row, j) * 0.24));
-          ctx.beginPath(); f.quad(ctx, u + 0.01, v + 0.01, u + bw - 0.01, v + rh - 0.008); ctx.fill();
+          const r0 = rnd(sd, row, j), burnt = rnd(sd + 3, row, j) < 0.07;
+          ctx.fillStyle = burnt ? shade(mixA(c, [60, 40, 40], 0.45), L * (0.8 + r0 * 0.2)) : shade(c, L * (0.84 + r0 * 0.28));
+          ctx.beginPath(); f.quad(ctx, u + 0.011, v + 0.01, u + bw - 0.011, v + rh - 0.009); ctx.fill();
+          f.seg(hi, u + 0.011, v + rh - 0.01, u + bw - 0.011, v + rh - 0.01);
+          f.seg(lo, u + 0.011, v + 0.011, u + bw - 0.011, v + 0.011);
         }
       }
+      ctx.lineWidth = 0.4;
+      ctx.strokeStyle = shade(c, L * 1.25); ctx.stroke(hi);
+      ctx.strokeStyle = shade(c, L * 0.5); ctx.stroke(lo);
       if (opt.quoin) { // stone corner blocks
         for (let r = 0, v = 0; v < V; v += 0.14, r++) {
           const w = r % 2 ? 0.16 : 0.26;
@@ -224,6 +296,12 @@ function texture(ctx, f, mat, c, L, opt) {
         ctx.beginPath(); f.seg(ctx, u, 0.05, u + step, V > 0.6 ? V * 0.5 : V - 0.05); ctx.stroke();
         if (V > 0.6) { ctx.beginPath(); f.seg(ctx, u + step, V * 0.5, u, V - 0.05); ctx.stroke(); }
       }
+      // grain highlights and dark pegs at the joints
+      const gr = new Path2D(), pg = new Path2D();
+      for (let i = 0; i <= n; i++) { const u = U0 + i * step; f.seg(gr, u - bw * 0.4, 0.02, u - bw * 0.4, V - 0.02); for (const v of [0.035, V - 0.03]) { const q = f.p(u, v); pg.rect(q[0] - 0.5, q[1] - 0.5, 1, 1); } }
+      f.seg(gr, U0, 0.05, U1, 0.05); f.seg(gr, U0, V - 0.015, U1, V - 0.015);
+      ctx.strokeStyle = shade(opt.beam || '#4a3220', L * 1.35); ctx.lineWidth = 0.35; ctx.stroke(gr);
+      ctx.fillStyle = shade(opt.beam || '#4a3220', L * 0.5); ctx.fill(pg);
       break;
     }
     case 'logs': {
@@ -239,18 +317,24 @@ function texture(ctx, f, mat, c, L, opt) {
       break;
     }
     case 'planks': case 'hplanks': {
-      const pw = 0.1;
+      const pw = 0.1, grain = new Path2D(), nail = new Path2D();
       if (mat === 'planks') {
         for (let u = U0, i = 0; u < U1; u += pw, i++) {
           ctx.fillStyle = shade(c, L * (0.86 + rnd(sd, i, 1) * 0.24)); ctx.beginPath(); f.quad(ctx, u, -1, u + pw, V + 1); ctx.fill();
           ctx.strokeStyle = shade(c, L * 0.55); ctx.lineWidth = 0.5; ctx.beginPath(); f.seg(ctx, u, -1, u, V + 1); ctx.stroke();
+          f.seg(grain, u + pw * (0.3 + rnd(sd, i, 2) * 0.4), 0, u + pw * (0.3 + rnd(sd, i, 3) * 0.4), V);
+          for (let v = 0.12; v < V; v += 0.5) { const q = f.p(u + pw * 0.5, v); nail.rect(q[0] - 0.4, q[1] - 0.4, 0.8, 0.8); }
         }
       } else {
         for (let v = 0, i = 0; v < V; v += 0.08, i++) {
           ctx.fillStyle = shade(c, L * (0.86 + rnd(sd, i, 1) * 0.24)); ctx.beginPath(); f.quad(ctx, U0, v, U1, v + 0.08); ctx.fill();
           ctx.strokeStyle = shade(c, L * 0.55); ctx.lineWidth = 0.5; ctx.beginPath(); f.seg(ctx, U0, v + 0.002, U1, v + 0.002); ctx.stroke();
+          f.seg(grain, U0, v + 0.03 + rnd(sd, i, 2) * 0.03, U1, v + 0.03 + rnd(sd, i, 3) * 0.03);
+          for (let u = U0 + 0.05; u < U1; u += 0.45) { const q = f.p(u, v + 0.04); nail.rect(q[0] - 0.4, q[1] - 0.4, 0.8, 0.8); }
         }
       }
+      ctx.strokeStyle = shade(c, L * 0.74); ctx.lineWidth = 0.35; ctx.stroke(grain);
+      ctx.fillStyle = 'rgba(30,26,24,0.55)'; ctx.fill(nail);
       break;
     }
     case 'wattle': {
@@ -355,13 +439,20 @@ function texture(ctx, f, mat, c, L, opt) {
     }
     case 'slate': case 'shingle': {
       const rh = mat === 'slate' ? 0.085 : 0.1, w = mat === 'slate' ? 0.13 : 0.11;
+      const hi = new Path2D(), lo = new Path2D();
       for (let v = 0, r = 0; v < V; v += rh, r++) {
         let j = 0;
         for (let u = U0 - (r % 2) * w / 2; u < U1; u += w, j++) {
-          ctx.fillStyle = shade(c, L * (0.86 + rnd(sd, r, j) * 0.26)); ctx.beginPath(); f.quad(ctx, u, v, u + w - 0.012, v + rh); ctx.fill();
+          const r0 = rnd(sd, r, j), odd = rnd(sd + 7, r, j);
+          const lv = odd < 0.06 ? 0.68 : odd > 0.95 ? 1.18 : 0.86 + r0 * 0.26;
+          const ww = w - 0.012 - (mat === 'shingle' ? rnd(sd + 2, r, j) * 0.02 : 0);
+          ctx.fillStyle = shade(c, L * lv); ctx.beginPath(); f.quad(ctx, u, v, u + ww, v + rh); ctx.fill();
+          f.seg(hi, u + 0.008, v + 0.012, u + 0.008, v + rh); f.seg(lo, u + ww, v, u + ww, v + rh);
         }
-        ctx.strokeStyle = shade(c, L * 0.55); ctx.lineWidth = 0.8; ctx.beginPath(); f.seg(ctx, U0, v + rh, U1, v + rh); ctx.stroke();
+        ctx.strokeStyle = shade(c, L * 0.5); ctx.lineWidth = 0.8; ctx.beginPath(); f.seg(ctx, U0, v + rh, U1, v + rh); ctx.stroke();
+        ctx.strokeStyle = shade(c, L * 1.15); ctx.lineWidth = 0.4; ctx.beginPath(); f.seg(ctx, U0, v + 0.012, U1, v + 0.012); ctx.stroke();
       }
+      ctx.lineWidth = 0.4; ctx.strokeStyle = shade(c, L * 1.2); ctx.stroke(hi); ctx.strokeStyle = shade(c, L * 0.55); ctx.stroke(lo);
       break;
     }
     case 'roofmetal': {
@@ -487,7 +578,19 @@ export function hipRoof(ctx, x0, y0, x1, y1, z, h, col, mat, over = 0.1, pyramid
 
 // flat roof with parapet
 export function flatRoof(ctx, x0, y0, x1, y1, z, col, par = 0.08, mat = 'gravel', parCol) {
-  paint(ctx, topF(x0, y0, x1, y1, z), mat, col, { edge: false });
+  const tf = topF(x0, y0, x1, y1, z);
+  paint(ctx, tf, mat, col, { edge: false });
+  if (mat === 'gravel' && x1 - x0 > 0.6 && y1 - y0 > 0.6) { // membrane seams, patched repairs, puddle stains
+    ctx.save(); ctx.beginPath(); tf.outline(ctx); ctx.clip();
+    const sd = tf.seed + 7, sm = new Path2D();
+    for (let u = 0.45; u < tf.U; u += 0.45) tf.seg(sm, u, 0, u, tf.V);
+    ctx.strokeStyle = 'rgba(20,18,16,0.22)'; ctx.lineWidth = 0.6; ctx.stroke(sm);
+    for (let i = 0; i < 3; i++) {
+      const u = rnd(sd, i, 1) * (tf.U - 0.3), v = rnd(sd, i, 2) * (tf.V - 0.3), w = 0.12 + rnd(sd, i, 3) * 0.2;
+      ctx.fillStyle = i === 2 ? 'rgba(40,46,56,0.18)' : 'rgba(18,16,14,0.2)'; ctx.beginPath(); tf.quad(ctx, u, v, u + w, v + w * 0.7); ctx.fill();
+    }
+    ctx.restore();
+  }
   if (par > 0) {
     const t = 0.05, pc = parCol || shade(col, 1.15);
     tbox(ctx, x0, y0, x0 + t, y1, z, z + par, pc, null, { edgeA: 0.2 });
@@ -714,8 +817,19 @@ export function door(ctx, f, u, w, h, kind, o = {}) {
   else for (let k = u + 0.06; k < u + w; k += 0.06) f.seg(ctx, k, 0, k, h);
   ctx.stroke();
   if (kind === 'gate') { ctx.strokeStyle = shade('#222', L); ctx.lineWidth = 0.9; ctx.beginPath(); for (let k = u + 0.08; k < u + w; k += 0.1) f.seg(ctx, k, 0, k, h); for (let k = 0.1; k < h; k += 0.12) f.seg(ctx, u, k, u + w, k); ctx.stroke(); }
-  else { ctx.strokeStyle = 'rgba(20,20,20,0.7)'; ctx.lineWidth = 0.8; ctx.beginPath(); f.seg(ctx, u, h * 0.25, u + w, h * 0.25); f.seg(ctx, u, h * 0.7, u + w, h * 0.7); ctx.stroke(); }
+  else if (kind === 'panel') { ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); f.quad(ctx, u + w * 0.15, h * 0.45, u + w * 0.45, h * 0.47); f.quad(ctx, u + w * 0.55, h * 0.45, u + w * 0.85, h * 0.47); ctx.fill(); }
+  else {
+    // strap hinges with nail heads, running from the hinge side
+    ctx.strokeStyle = 'rgba(24,22,22,0.85)'; ctx.lineWidth = 0.9; ctx.beginPath(); f.seg(ctx, u, h * 0.25, u + w * 0.82, h * 0.25); f.seg(ctx, u, h * 0.7, u + w * 0.82, h * 0.7); ctx.stroke();
+    ctx.strokeStyle = 'rgba(200,190,170,0.25)'; ctx.lineWidth = 0.35; ctx.beginPath(); f.seg(ctx, u, h * 0.25 + 0.012, u + w * 0.82, h * 0.25 + 0.012); f.seg(ctx, u, h * 0.7 + 0.012, u + w * 0.82, h * 0.7 + 0.012); ctx.stroke();
+    ctx.fillStyle = 'rgba(16,14,14,0.9)';
+    for (const hv of [0.25, 0.7]) for (let k = 0.15; k < 0.82; k += 0.22) { const q = f.p(u + w * k, h * hv); ctx.fillRect(q[0] - 0.45, q[1] - 0.45, 0.9, 0.9); }
+  }
   ctx.restore();
+  if (kind !== 'gate') { // handle / ring pull
+    const q = f.p(u + w * 0.8, h * 0.45);
+    ctx.strokeStyle = kind === 'panel' ? '#d8b860' : '#1a1614'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.arc(q[0], q[1] + 0.8, 1, 0, 6.3); ctx.stroke();
+  }
   if (o.step !== false) { const st = o.stepCol || '#9a948a'; ctx.fillStyle = shade(st, LIT.T); const a = f.p(u - 0.06, 0); ctx.beginPath(); const p1 = f.p(u - 0.06, 0), p2 = f.p(u + w + 0.06, 0); const dn = f.n; const p3 = P(f.o[0] + f.a[0] * (u + w + 0.06) + dn[0] * 0.12, f.o[1] + f.a[1] * (u + w + 0.06) + dn[1] * 0.12, f.o[2]), p4 = P(f.o[0] + f.a[0] * (u - 0.06) + dn[0] * 0.12, f.o[1] + f.a[1] * (u - 0.06) + dn[1] * 0.12, f.o[2]); ctx.moveTo(...p1); ctx.lineTo(...p2); ctx.lineTo(...p3); ctx.lineTo(...p4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 0.5; ctx.stroke(); void a; }
 }
 
@@ -798,19 +912,34 @@ export function awning(ctx, f, u, v, w, d, team, alt = '#f0e8d8') {
 export function barrel(ctx, x, y, col = '#7a4a26') {
   tcyl(ctx, x, y, 0, 0.2, 0.075, col, 'planks', 10);
   const c = hexToRgb(col);
-  for (const z of [0.05, 0.15]) { ctx.strokeStyle = '#2a2420'; ctx.lineWidth = 0.7; ctx.beginPath(); for (let k = 0; k <= 8; k++) { const a = -0.8 + k / 8 * 3.2; const q = P(x + Math.cos(a) * 0.077, y + Math.sin(a) * 0.077, z); k ? ctx.lineTo(...q) : ctx.moveTo(...q); } ctx.stroke(); }
-  void c;
+  for (const z of [0.035, 0.165]) {
+    ctx.strokeStyle = '#2a2420'; ctx.lineWidth = 0.8; ctx.beginPath(); for (let k = 0; k <= 8; k++) { const a = -0.8 + k / 8 * 3.2; const q = P(x + Math.cos(a) * 0.077, y + Math.sin(a) * 0.077, z); k ? ctx.lineTo(...q) : ctx.moveTo(...q); } ctx.stroke();
+    ctx.strokeStyle = 'rgba(220,210,190,0.35)'; ctx.lineWidth = 0.35; ctx.beginPath(); for (let k = 0; k <= 4; k++) { const a = 0.6 + k / 4 * 1.2; const q = P(x + Math.cos(a) * 0.078, y + Math.sin(a) * 0.078, z + 0.008); k ? ctx.lineTo(...q) : ctx.moveTo(...q); } ctx.stroke();
+  }
+  // lid: darker head with plank seams and a bung
+  const t0 = P(x, y, 0.2);
+  ctx.fillStyle = shade(c, 0.78); ctx.beginPath(); ctx.ellipse(t0[0], t0[1], 0.062 * TW * 0.7, 0.062 * TH * 0.7, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = shade(c, 0.5); ctx.lineWidth = 0.35; ctx.beginPath(); ctx.moveTo(t0[0] - 2.2, t0[1] - 0.6); ctx.lineTo(t0[0] + 2.2, t0[1] - 0.6); ctx.moveTo(t0[0] - 2.4, t0[1] + 0.5); ctx.lineTo(t0[0] + 2.4, t0[1] + 0.5); ctx.stroke();
+  ctx.fillStyle = '#2a1c12'; ctx.fillRect(t0[0] + 0.6, t0[1] - 0.3, 0.9, 0.7);
 }
 export function crate(ctx, x, y, s = 0.16, z = 0, col = '#9a7448') {
   tbox(ctx, x - s / 2, y - s / 2, x + s / 2, y + s / 2, z, z + s * 0.9, col, 'hplanks', { edgeA: 0.5 });
   ctx.strokeStyle = shade(col, 0.5); ctx.lineWidth = 0.6;
   const a = P(x - s / 2, y + s / 2, z), b = P(x + s / 2, y + s / 2, z + s * 0.9); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+  // lighter frame boards along the visible edges
+  ctx.strokeStyle = shade(col, 1.12); ctx.lineWidth = 0.9; ctx.lineJoin = 'round';
+  const e = [P(x - s / 2, y + s / 2, z + s * 0.9), P(x + s / 2, y + s / 2, z + s * 0.9), P(x + s / 2, y - s / 2, z + s * 0.9)], d = P(x + s / 2, y + s / 2, z);
+  ctx.beginPath(); ctx.moveTo(...e[0]); ctx.lineTo(...e[1]); ctx.lineTo(...e[2]); ctx.moveTo(...e[1]); ctx.lineTo(...d); ctx.stroke();
+  ctx.fillStyle = 'rgba(30,24,20,0.7)'; for (const q of [e[0], e[1], e[2], d]) ctx.fillRect(q[0] - 0.4, q[1] + 0.3, 0.8, 0.8);
 }
 export function sack(ctx, x, y, col = '#c8b080') {
   const [sx, sy] = P(x, y, 0);
-  ctx.fillStyle = shade(col, 0.9); ctx.beginPath(); ctx.ellipse(sx, sy - 3, 3.6, 3.4, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = shade(col, 1.15); ctx.beginPath(); ctx.ellipse(sx - 1, sy - 4, 2, 2, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = shade(col, 0.7); ctx.fillRect(sx - 1, sy - 7.5, 2, 1.5);
+  ctx.fillStyle = 'rgba(20,14,8,0.3)'; ctx.beginPath(); ctx.ellipse(sx + 1.2, sy + 0.2, 4.4, 1.6, 0, 0, 7); ctx.fill();
+  const g = ctx.createRadialGradient(sx - 1.4, sy - 4.6, 0.4, sx, sy - 3, 4.4); g.addColorStop(0, shade(col, 1.2)); g.addColorStop(0.6, shade(col, 0.92)); g.addColorStop(1, shade(col, 0.62));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(sx - 3.6, sy - 1); ctx.quadraticCurveTo(sx - 4.2, sy - 5.6, sx - 1.2, sy - 6.6); ctx.lineTo(sx + 1.2, sy - 6.6); ctx.quadraticCurveTo(sx + 4.2, sy - 5.6, sx + 3.6, sy - 1); ctx.quadraticCurveTo(sx, sy + 0.8, sx - 3.6, sy - 1); ctx.fill();
+  ctx.fillStyle = shade(col, 0.8); ctx.beginPath(); ctx.moveTo(sx - 1.3, sy - 6.6); ctx.lineTo(sx - 0.6, sy - 8.4); ctx.lineTo(sx + 0.8, sy - 8.4); ctx.lineTo(sx + 1.3, sy - 6.6); ctx.fill();
+  ctx.strokeStyle = '#5a4026'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(sx - 1.4, sy - 6.7); ctx.lineTo(sx + 1.4, sy - 6.7); ctx.stroke();
+  ctx.strokeStyle = shade(col, 0.6); ctx.lineWidth = 0.4; ctx.beginPath(); ctx.moveTo(sx - 1.6, sy - 5.6); ctx.quadraticCurveTo(sx - 2.2, sy - 3.4, sx - 1.2, sy - 1.4); ctx.moveTo(sx + 1.2, sy - 5.8); ctx.quadraticCurveTo(sx + 2, sy - 4, sx + 1.8, sy - 2); ctx.stroke();
 }
 export function hay(ctx, x, y, r = 0.18) {
   tdome(ctx, x, y, 0, r, '#d6b85a', { ribs: 0 });
@@ -861,9 +990,14 @@ export function fence(ctx, pts, col = '#6b4a2a', h = 0.22, kind = 'rail') {
 export function lamp(ctx, x, y, h = 0.6, col = '#2a2a2a', light = 'rgba(255,220,140,0.9)') {
   const a = P(x, y, 0), b = P(x, y, h);
   ctx.strokeStyle = col; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
-  const g = ctx.createRadialGradient(b[0], b[1], 0, b[0], b[1], 6); g.addColorStop(0, light); g.addColorStop(1, 'rgba(255,200,100,0)');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b[0], b[1], 6, 0, 7); ctx.fill();
-  ctx.fillStyle = '#fff6d0'; ctx.beginPath(); ctx.arc(b[0], b[1], 1.3, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 0.4; ctx.beginPath(); ctx.moveTo(a[0] - 0.4, a[1]); ctx.lineTo(b[0] - 0.4, b[1] + 2); ctx.stroke();
+  ctx.fillStyle = col; ctx.fillRect(a[0] - 1.2, a[1] - 1.2, 2.4, 1.2); // foot
+  const g = ctx.createRadialGradient(b[0], b[1], 0, b[0], b[1], 7); g.addColorStop(0, light); g.addColorStop(1, 'rgba(255,200,100,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b[0], b[1], 7, 0, 7); ctx.fill();
+  // lantern: glass box between a cap and a base plate
+  ctx.fillStyle = '#fff2c0'; ctx.fillRect(b[0] - 1.3, b[1] - 1.6, 2.6, 2.8);
+  ctx.strokeStyle = col; ctx.lineWidth = 0.5; ctx.strokeRect(b[0] - 1.3, b[1] - 1.6, 2.6, 2.8); ctx.beginPath(); ctx.moveTo(b[0], b[1] - 1.6); ctx.lineTo(b[0], b[1] + 1.2); ctx.stroke();
+  ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(b[0] - 2, b[1] - 1.6); ctx.lineTo(b[0], b[1] - 3.2); ctx.lineTo(b[0] + 2, b[1] - 1.6); ctx.closePath(); ctx.fill(); ctx.fillRect(b[0] - 1.6, b[1] + 1.2, 3.2, 0.8);
 }
 export function antenna(ctx, x, y, z, h, col = '#c8ccd0') {
   const a = P(x, y, z), b = P(x, y, z + h);
