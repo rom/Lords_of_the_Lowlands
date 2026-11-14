@@ -165,6 +165,11 @@ Set `metrics.token` (≥ 16 characters) and scrape with `Authorization: Bearer <
 
 ## How to play
 
+New to the game? Read the **[User Manual](docs/manual.md)** — objectives, economy, the seventeen
+ages, tactics, balance, difficulties and every option — and the **[FAQ](docs/faq.md)** with 100
+questions and answers. Both are also built into the game: **Manual & FAQ** in the main menu or on the
+sign-in screen, or `F4` during play.
+
 Press **`?`** (or `F1`, or the **?** button) in a game for the full shortcut sheet; the level editor has its own (`?` there too).
 
 | Action | Control |
@@ -219,7 +224,8 @@ docs/               architecture, design, ADRs, ASRs, API, security, tests, oper
 
 ## Documentation
 
-See [docs/README.md](docs/README.md): architecture, detailed design, game design, API, security,
+For players: the [User Manual](docs/manual.md) and the [FAQ](docs/faq.md) (also in-game, `F4`).
+For everything else see [docs/README.md](docs/README.md): architecture, detailed design, game design, API, security,
 architecture decision records, architecturally significant requirements, testing, operations and the
 level-editor guide.
 
