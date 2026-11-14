@@ -179,9 +179,9 @@ export class Renderer {
           // wet sand on the land side of the shore, foam on the water side
           if (ww > 0.12 && ww < 0.5) lg *= 1 - 0.22 * Math.sin((ww - 0.12) / 0.38 * Math.PI);
         }
-        let r = acc[0] * lg, g2 = acc[1] * lg, b = acc[2] * lg;
-        if (!space && ww > 0.46 && ww < 0.66) { const f = (1 - Math.abs(ww - 0.54) / 0.1) * (0.55 + n2 * 0.6); if (f > 0) { const k = Math.min(0.75, f * 0.6); r += (245 - r) * k; g2 += (250 - g2) * k; b += (252 - b) * k; } }
-        d[o] = r; d[o + 1] = g2; d[o + 2] = b; d[o + 3] = 255;
+        let r = acc[0] * lg, g2 = acc[1] * lg, b2 = acc[2] * lg;
+        if (!space && ww > 0.46 && ww < 0.66) { const f = (1 - Math.abs(ww - 0.54) / 0.1) * (0.55 + n2 * 0.6); if (f > 0) { const k = Math.min(0.75, f * 0.6); r += (245 - r) * k; g2 += (250 - g2) * k; b2 += (252 - b2) * k; } }
+        d[o] = r; d[o + 1] = g2; d[o + 2] = b2; d[o + 3] = 255;
         if (mimg) {
           const wa = clamp((ww + ws * 0.7 - 0.5) * 4 + 0.5, 0, 1);
           mimg.data[o] = mimg.data[o + 1] = mimg.data[o + 2] = 255; mimg.data[o + 3] = wa * 255;
@@ -193,29 +193,28 @@ export class Renderer {
     // soft water mask (for animated waves) and shore foam mask
     let water = null, foam = null;
     if (mimg) {
-      water = document.createElement('canvas'); water.width = cw; water.height = chh; water.getContext('2d').putImageData(mimg, 0, 0);
+      const mask = document.createElement('canvas'); mask.width = cw; mask.height = chh; mask.getContext('2d').putImageData(mimg, 0, 0);
       foam = document.createElement('canvas'); foam.width = cw; foam.height = chh; foam.getContext('2d').putImageData(fimg, 0, 0);
+      // two pre-masked wave layers (different phases) that are cross-faded live
+      water = [0, 1].map(k => {
+        const wv = document.createElement('canvas'); wv.width = cw; wv.height = chh;
+        const wc = wv.getContext('2d');
+        const tx = ((k * 64 - ox) % 128 + 128) % 128 - 128, ty = ((k * 32 - oy) % 64 + 64) % 64 - 64;
+        wc.save(); wc.translate(tx, ty); wc.fillStyle = this.waterPattern; wc.fillRect(0, 0, cw + 128, chh + 64); wc.restore();
+        wc.globalCompositeOperation = 'destination-in'; wc.drawImage(mask, 0, 0);
+        return wv;
+      });
     }
     return { cv, ox, oy, water, foam };
   }
 
   // animated wave pattern masked to the water, plus pulsing shore foam
   drawWater(ctx, c, cx, cy) {
-    const cw = CH * TW, chh = CH * TH;
-    if (!this.wscratch) { this.wscratch = document.createElement('canvas'); this.wscratch.width = cw; this.wscratch.height = chh; }
-    const sc = this.wscratch.getContext('2d');
-    sc.globalCompositeOperation = 'source-over';
-    sc.clearRect(0, 0, cw, chh);
     const t = this.time;
-    for (let k = 0; k < 2; k++) {
-      const off = (t * (k ? 7 : 12) + k * 40) % 128;
-      const tx = ((off - c.ox) % 128 + 128) % 128 - 128, ty = ((off * 0.5 * (k ? -1 : 1) - c.oy) % 64 + 64) % 64 - 64;
-      sc.save(); sc.globalAlpha = k ? 0.5 : 1; sc.translate(tx, ty);
-      sc.fillStyle = this.waterPattern; sc.fillRect(0, 0, cw + 128, chh + 64); sc.restore();
-    }
-    sc.globalCompositeOperation = 'destination-in';
-    sc.drawImage(c.water, 0, 0);
-    ctx.globalAlpha = 0.32; ctx.drawImage(this.wscratch, c.ox, c.oy);
+    const f = 0.5 + 0.5 * Math.sin(t * 0.9);
+    const dx = Math.sin(t * 0.35) * 4, dy = Math.cos(t * 0.3) * 2;
+    ctx.globalAlpha = 0.34 * f; ctx.drawImage(c.water[0], c.ox + dx, c.oy + dy);
+    ctx.globalAlpha = 0.34 * (1 - f); ctx.drawImage(c.water[1], c.ox - dx, c.oy - dy);
     if (c.foam) { ctx.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.3 + cx * 1.7 + cy * 2.3); ctx.drawImage(c.foam, c.ox, c.oy); }
     ctx.globalAlpha = 1;
   }
@@ -245,13 +244,25 @@ export class Renderer {
     const ctx = cv.getContext('2d'); ctx.scale(2, 2); ctx.translate(40, 56);
     const base = this.th.t[T_MTN];
     const snow = this.themeName === 'winter';
-    for (let i = 0; i < 4; i++) {
-      const x = (hash2(v, i, 1) - 0.5) * 30, hgt = 14 + hash2(v, i, 2) * 26, wd = 10 + hash2(v, i, 3) * 8, y = (hash2(v, i, 4) - 0.5) * 8;
-      ctx.fillStyle = shade(base, 0.55);
-      ctx.beginPath(); ctx.moveTo(x - wd, y + 6); ctx.lineTo(x - wd * 0.3, y - hgt); ctx.lineTo(x, y + 8); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = shade(base, 1.05);
-      ctx.beginPath(); ctx.moveTo(x + wd, y + 6); ctx.lineTo(x - wd * 0.3, y - hgt); ctx.lineTo(x, y + 8); ctx.closePath(); ctx.fill();
-      if (snow || hgt > 34) { ctx.fillStyle = 'rgba(245,248,255,0.9)'; ctx.beginPath(); ctx.moveTo(x - wd * 0.3, y - hgt); ctx.lineTo(x - wd * 0.55, y - hgt * 0.65); ctx.lineTo(x + wd * 0.2, y - hgt * 0.62); ctx.closePath(); ctx.fill(); }
+    const peaks = [];
+    for (let i = 0; i < 5; i++) peaks.push({ x: (hash2(v, i, 1) - 0.5) * 32, hgt: 12 + hash2(v, i, 2) * 28, wd: 10 + hash2(v, i, 3) * 9, y: (hash2(v, i, 4) - 0.5) * 9 });
+    peaks.sort((a, b) => a.y - b.y);
+    for (const { x, hgt, wd, y } of peaks) {
+      const tx = x - wd * 0.25, ty = y - hgt;
+      // silhouette outline
+      ctx.fillStyle = 'rgba(20,18,16,0.7)';
+      ctx.beginPath(); ctx.moveTo(x - wd - 1, y + 7); ctx.lineTo(tx, ty - 1.2); ctx.lineTo(x + wd + 1, y + 7); ctx.lineTo(x, y + 9); ctx.closePath(); ctx.fill();
+      // lit (left) and shadow (right) faces with a mid facet
+      ctx.fillStyle = shade(base, 1.08);
+      ctx.beginPath(); ctx.moveTo(x - wd, y + 6); ctx.lineTo(tx, ty); ctx.lineTo(x - wd * 0.15, y + 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(base, 0.86);
+      ctx.beginPath(); ctx.moveTo(x - wd * 0.15, y + 8); ctx.lineTo(tx, ty); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(x + wd * 0.4, y + 7.5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(base, 0.58);
+      ctx.beginPath(); ctx.moveTo(x + wd * 0.4, y + 7.5); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(tx, ty); ctx.lineTo(x + wd, y + 6); ctx.closePath(); ctx.fill();
+      // strata cracks
+      ctx.strokeStyle = shade(base, 0.5); ctx.lineWidth = 0.6;
+      for (let k = 1; k < 3; k++) { const f = k / 3; ctx.beginPath(); ctx.moveTo(x - wd * (1 - f) * 0.9, y + 6 - hgt * f * 0.9); ctx.lineTo(x - wd * 0.2 * (1 - f), y + 7 - hgt * f * 0.75); ctx.stroke(); }
+      if (snow || hgt > 32) { ctx.fillStyle = 'rgba(245,248,255,0.92)'; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - wd * 0.3, ty + hgt * 0.32); ctx.lineTo(tx - wd * 0.05, ty + hgt * 0.24); ctx.lineTo(tx + wd * 0.15, ty + hgt * 0.36); ctx.lineTo(tx + wd * 0.3, ty + hgt * 0.22); ctx.closePath(); ctx.fill(); }
     }
     this.rockCache[key] = cv;
     return cv;
@@ -716,7 +727,7 @@ export class Renderer {
       mctx.drawImage(this.miniFogLayer, 0, 0);
     }
     // entities: team-coloured dots with a dark outline (client data is fog-filtered already)
-    const k = S / (this.w + this.h);
+    const k = S * 0.94 / (this.w + this.h);
     const dot = Math.max(2, k * 1.6);
     for (const e of ents) {
       const [px, py] = this.miniPoint(e.x, e.y, S);
@@ -730,9 +741,9 @@ export class Renderer {
       if (e.k === 1) {
         const sz = (e.def ? e.def.size : 1) * k;
         mctx.fillStyle = 'rgba(0,0,0,0.75)';
-        mctx.beginPath(); mctx.moveTo(px, py - sz - 1); mctx.lineTo(px + sz * 2 + 1.5, py); mctx.lineTo(px, py + sz + 1); mctx.lineTo(px - sz * 2 - 1.5, py); mctx.closePath(); mctx.fill();
+        mctx.beginPath(); mctx.moveTo(px, py - sz - 1); mctx.lineTo(px + sz + 1, py); mctx.lineTo(px, py + sz + 1); mctx.lineTo(px - sz - 1, py); mctx.closePath(); mctx.fill();
         mctx.fillStyle = col;
-        mctx.beginPath(); mctx.moveTo(px, py - sz); mctx.lineTo(px + sz * 2, py); mctx.lineTo(px, py + sz); mctx.lineTo(px - sz * 2, py); mctx.closePath(); mctx.fill();
+        mctx.beginPath(); mctx.moveTo(px, py - sz); mctx.lineTo(px + sz, py); mctx.lineTo(px, py + sz); mctx.lineTo(px - sz, py); mctx.closePath(); mctx.fill();
       } else {
         mctx.fillStyle = 'rgba(0,0,0,0.75)'; mctx.fillRect(px - dot / 2 - 1, py - dot / 2 - 1, dot + 2, dot + 2);
         mctx.fillStyle = col; mctx.fillRect(px - dot / 2, py - dot / 2, dot, dot);
@@ -773,12 +784,13 @@ export class Renderer {
     }
     mctx.restore();
   }
+  // The minimap shows the map as a diamond filling the whole square canvas.
   miniTransform(c, S) {
-    const k = S / (this.w + this.h);
-    c.transform(k, k / 2, -k, k / 2, S / 2, S / 4);
+    const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h);
+    c.transform(k, k, -k, k, this.h * k + m, m);
   }
-  miniPoint(x, y, S) { const k = S / (this.w + this.h); return [(x - y) * k + S / 2, (x + y) * k / 2 + S / 4]; }
-  miniToWorld(px, py, S) { const k = S / (this.w + this.h); const a = (px - S / 2) / k, b = (py - S / 4) * 2 / k; return [(a + b) / 2, (b - a) / 2]; }
+  miniPoint(x, y, S) { const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h); return [(x - y) * k + this.h * k + m, (x + y) * k + m]; }
+  miniToWorld(px, py, S) { const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h); const a = (px - m - this.h * k) / k, b = (py - m) / k; return [(a + b) / 2, (b - a) / 2]; }
 }
 
 function makeWaterPattern() {

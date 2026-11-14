@@ -446,7 +446,7 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 			break
 		}
 	}
-	if threat != nil && !a.attacking {
+	if threat != nil && !a.attacking && a.prof.Defend {
 		for _, m := range s.military {
 			if m.Order == OIdle || m.Order == OMove {
 				g.smart(m, threat, CmdAttack)
@@ -544,15 +544,34 @@ func (a *AI) naval(g *Game, p *Player, s *aiState) {
 			return
 		}
 		// nearest shore to the town centre
+		// nearest shore (terrain is public knowledge; the map is sent to
+		// every client) — scout it first if it is still unexplored
 		bx, by, bd := 0.0, 0.0, 30.0
 		for y := 0; y < g.H; y++ {
 			for x := 0; x < g.W; x++ {
-				if g.Tiles[y*g.W+x] == TWater && p.Explored[y*g.W+x] {
+				if g.Tiles[y*g.W+x] == TWater {
 					if d := math.Hypot(float64(x)-s.tc.X, float64(y)-s.tc.Y); d < bd {
 						bx, by, bd = float64(x), float64(y), d
 					}
 				}
 			}
+		}
+		if bd < 30 && !p.Explored[int(by)*g.W+int(bx)] {
+			if g.Tick-a.lastBuild["scout"] > 300 {
+				scouts := s.military
+				if len(scouts) == 0 && len(s.idle) > 0 {
+					scouts = s.idle
+				} else if len(scouts) == 0 && len(s.workers) > 4 {
+					scouts = s.workers[len(s.workers)-1:]
+				}
+				if len(scouts) > 0 {
+					if sx, sy, ok := g.freeSpotNear(bx+0.5, by+0.5, 1); ok {
+						g.orderMove(scouts[0], sx, sy, false) // walk to the shore
+					}
+					a.lastBuild["scout"] = g.Tick
+				}
+			}
+			return
 		}
 		if bd < 30 {
 			a.dockSpot = true

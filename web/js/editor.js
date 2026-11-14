@@ -203,8 +203,9 @@ class Editor {
 
   async generate() {
     try {
-      const l = await api('/api/generate', { method: 'POST', body: { theme: this.lv.theme, size: this.lv.width, startAge: this.lv.startAge, maxAge: this.lv.maxAge, seed: Math.floor(Math.random() * 1e9), water: 0.3, players: Math.max(2, this.starts.length) } });
-      l.name = this.lv.name; l.description = this.lv.description; l.id = this.lv.id;
+      const l = await api('/api/generate', { method: 'POST', body: { theme: this.lv.theme, size: this.lv.width, startAge: this.lv.startAge, maxAge: this.lv.maxAge, seed: Math.floor(Math.random() * 1e9), water: 0.3, players: Math.max(2, this.starts.length), mapType: $('#pmaptype').value } });
+      const mt = $('#pmaptype').value;
+      l.name = this.lv.name; l.description = this.lv.description; l.id = this.lv.id; l.mapType = mt;
       this.lv = l; this.load(); this.status('Generated a random map');
     } catch (e) { this.status(e.message); }
   }

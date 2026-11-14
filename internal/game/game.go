@@ -1132,6 +1132,9 @@ func (g *Game) attackStep(u *Entity, t *Entity, amove bool) {
 		pl := g.Players[u.Owner]
 		if u.U.Class != ClassWorker {
 			atk *= pl.attackMul
+			if u.U.Naval {
+				atk *= pl.navalMul
+			}
 		} else {
 			atk *= 1 + 0.25*float64(pl.Age)
 		}

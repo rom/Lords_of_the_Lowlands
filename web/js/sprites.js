@@ -1,7 +1,7 @@
 // Procedural art: terrain palettes, buildings, resources, units and icons.
 // Everything is drawn with canvas paths so no image assets are needed.
 import { TW, TH, ZH, TEAM, hexToRgb, shade, mix, rgb, hash2 } from './util.js';
-import { recStart, recStop, castShadows, setGround, lightOf } from './art/kit.js';
+import { recStart, recStop, castShadows, setGround } from './art/kit.js';
 import { drawShip } from './art/naval.js';
 import { drawBuildingBody, drawConstruction, drawAnim, hasAnim } from './art/buildings.js';
 
@@ -128,11 +128,6 @@ export function winR(ctx, x1, y0, u, v, w, h, col) {
   ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.lineTo(...d); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
 }
 
-function groundShadow(ctx, s, k = 0.25) {
-  ctx.fillStyle = `rgba(0,0,0,${k})`;
-  face(ctx, [[0.15, 0.25, 0], [s + 0.45, 0.25, 0], [s + 0.45, s + 0.35, 0], [0.15, s + 0.35, 0]], ctx.fillStyle);
-}
-
 // ------------------------------------------------------------- buildings
 // Buildings are drawn by ./art/buildings.js with textured, lit planes, in
 // three layers (ground patch, soft cast shadows, body) and cached at 2x.
@@ -146,30 +141,41 @@ function layer(w, h) {
 // the footprint's top corner). live=true leaves out parts that
 // drawBuildingAnim animates (windmill sails, glows) so they can be drawn live.
 export function buildingSprite(type, era, team, size, stage, live = false) {
-  const key = `${type}|${era}|${team}|${size}|${stage}|${live && hasAnim(type, era) ? 1 : 0}`;
+  const key = stage < 3 ? `${type}|${era}|-|${size}|${stage}|0` : `${type}|${era}|${team}|${size}|${stage}|${live && hasAnim(type, era) ? 1 : 0}`;
   let c = bcache.get(key);
   if (c) return c;
-  const padL = 44, padR = 140, top = 210, bottom = 24 + (type === 'dock' ? 56 : 0);
+  const padL = 44, padR = 150, top = 220, bottom = 24 + (type === 'dock' ? 60 : 0);
   const w = size * TW + padL + padR, h = size * TH + top + bottom;
   const ox = size * TW / 2 + padL, oy = top;
   const W2 = w * 2, H2 = h * 2;
-  const cv = layer(W2, H2);
-  if (!scratch || scratch.g.width < W2 || scratch.g.height < H2) scratch = { g: layer(W2, H2), b: layer(W2, H2) };
-  const gctx = scratch.g.getContext('2d'), bctx = scratch.b.getContext('2d');
-  for (const c2 of [gctx, bctx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, W2, H2); c2.setTransform(2, 0, 0, 2, ox * 2, oy * 2); }
+  if (!scratch || scratch.g.width < W2 || scratch.g.height < H2) scratch = { g: layer(W2, H2), b: layer(W2, H2), c: layer(W2, H2) };
+  const gctx = scratch.g.getContext('2d'), bctx = scratch.b.getContext('2d'), ctx = scratch.c.getContext('2d', { willReadFrequently: true });
+  for (const c2 of [gctx, bctx, ctx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, c2.canvas.width, c2.canvas.height); }
+  for (const c2 of [gctx, bctx]) c2.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
   setGround(gctx); recStart();
   try {
     if (stage < 3) drawConstruction(bctx, type, era, size, stage);
     else drawBuildingBody(bctx, type, era, team, size, 0, live);
   } finally { setGround(null); }
   const vols = recStop();
-  const ctx = cv.getContext('2d');
   ctx.drawImage(scratch.g, 0, 0, W2, H2, 0, 0, W2, H2);
   ctx.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
   castShadows(ctx, vols, type === 'farm' ? 0.2 : 0.36);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(scratch.b, 0, 0, W2, H2, 0, 0, W2, H2);
-  c = { canvas: cv, ox, oy, w, h };
+  // crop to the drawn content to keep the cache small
+  let x0 = 0, y0 = 0, x1 = W2, y1 = H2;
+  try {
+    const d = ctx.getImageData(0, 0, W2, H2).data;
+    x0 = W2; y0 = H2; x1 = 0; y1 = 0;
+    for (let y = 0; y < H2; y += 2) { const row = y * W2 * 4; for (let x = 0; x < W2; x += 2) if (d[row + x * 4 + 3] > 2) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+    if (x1 < x0) { x0 = 0; y0 = 0; x1 = 2; y1 = 2; }
+    x0 = Math.max(0, x0 - 2); y0 = Math.max(0, y0 - 2); x1 = Math.min(W2, x1 + 4); y1 = Math.min(H2, y1 + 4);
+  } catch (e) { /* keep full size */ }
+  x0 &= ~1; y0 &= ~1; x1 = Math.min(W2, x1 + (x1 & 1)); y1 = Math.min(H2, y1 + (y1 & 1));
+  const cv = layer(x1 - x0, y1 - y0);
+  cv.getContext('2d').drawImage(scratch.c, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
+  c = { canvas: cv, ox: ox - x0 / 2, oy: oy - y0 / 2, w: (x1 - x0) / 2, h: (y1 - y0) / 2 };
   bcache.set(key, c);
   return c;
 }
@@ -246,19 +252,29 @@ function drawResource(ctx, type, treeStyle, v) {
       const sc = 0.85 + rnd(2) * 0.35;
       ctx.save(); ctx.scale(sc, sc);
       if (style === 'oak') {
-        ctx.fillStyle = '#5a3b20'; ctx.fillRect(-2.5, -24, 5, 24);
+        // trunk with bark shading and two limbs
+        const tg = ctx.createLinearGradient(-3, 0, 3, 0); tg.addColorStop(0, '#7a5434'); tg.addColorStop(1, '#3a2414');
+        ctx.fillStyle = tg; ctx.beginPath(); ctx.moveTo(-3.2, 0); ctx.lineTo(-2, -26); ctx.lineTo(2, -26); ctx.lineTo(3.2, 0); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#3a2414'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-6, -27); ctx.moveTo(0, -21); ctx.lineTo(5, -29); ctx.stroke();
         const base = [[42, 92, 30], [58, 110, 36], [74, 128, 44]][Math.floor(rnd(3) * 3)];
-        for (let i = 0; i < 7; i++) {
-          const a = i / 7 * 6.28 + rnd(4), r = 9 + rnd(5 + i) * 5;
-          blob(ctx, Math.cos(a) * 8, -36 + Math.sin(a) * 6 - rnd(9 + i) * 6, r, rgb(base[0] * 0.75, base[1] * 0.75, base[2] * 0.75), rgb(base[0] * 1.35, base[1] * 1.3, base[2] * 1.2));
-        }
-        blob(ctx, 0, -42, 11, rgb(base[0], base[1], base[2]), rgb(base[0] * 1.5, base[1] * 1.4, base[2] * 1.3));
+        const bl = [];
+        for (let i = 0; i < 8; i++) { const a = i / 8 * 6.28 + rnd(4), r = 8 + rnd(5 + i) * 5; bl.push([Math.cos(a) * 9, -36 + Math.sin(a) * 6.5 - rnd(9 + i) * 6, r]); }
+        bl.push([0, -43, 11]); bl.push([-3, -48, 8]);
+        // dark outline pass, then lit blobs from back to front
+        ctx.fillStyle = 'rgba(16,28,10,0.85)';
+        for (const [x, y, r] of bl) { ctx.beginPath(); ctx.arc(x, y, r + 1.2, 0, 7); ctx.fill(); }
+        bl.sort((p, q) => p[1] - q[1]);
+        for (const [x, y, r] of bl) blob(ctx, x, y, r, rgb(base[0] * 0.62, base[1] * 0.66, base[2] * 0.62), rgb(base[0] * 1.45, base[1] * 1.38, base[2] * 1.2));
+        // leaf speckle and a shaded underside
+        for (let i = 0; i < 26; i++) { const x = (rnd(100 + i) - 0.5) * 30, y = -50 + rnd(130 + i) * 24; ctx.fillStyle = rnd(160 + i) < 0.5 ? 'rgba(255,255,200,0.18)' : 'rgba(0,20,0,0.22)'; ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 7); ctx.fill(); }
       } else if (style === 'pine' || style === 'snowpine') {
         ctx.fillStyle = '#4a2f1a'; ctx.fillRect(-2, -14, 4, 14);
         for (let i = 0; i < 4; i++) {
           const y = -12 - i * 11, w = 15 - i * 3;
           ctx.fillStyle = shade([30, 78, 44], 0.85 + i * 0.1);
-          ctx.beginPath(); ctx.moveTo(-w, y); ctx.lineTo(w, y); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(-w, y); ctx.quadraticCurveTo(0, y + 3, w, y); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill();
+          ctx.strokeStyle = 'rgba(10,26,14,0.8)'; ctx.lineWidth = 0.9; ctx.stroke();
+          ctx.strokeStyle = 'rgba(160,220,150,0.25)'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-w * 0.8, y - 1); ctx.lineTo(-1, y - 16); ctx.stroke();
           ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill();
           if (style === 'snowpine') { ctx.fillStyle = 'rgba(245,250,255,0.92)'; ctx.beginPath(); ctx.moveTo(-w * 0.7, y - 4); ctx.lineTo(w * 0.3, y - 6); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill(); }
         }
@@ -734,7 +750,7 @@ export function iconCanvas(kind, type, def, era, team, themeName, size = 44) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
   if (kind === 'unit') {
     const naval = def.naval || def.class === 'naval';
-    ctx.save(); ctx.translate(size / 2, size * (naval ? 0.66 : 0.86)); const s = naval ? size / 60 : def.class === 'mounted' || def.class === 'siege' || def.class === 'animal' ? 1.15 : 1.6; ctx.scale(s, s);
+    ctx.save(); ctx.translate(size / 2, size * (naval ? 0.66 : 0.86)); const s = naval ? size / 60 : def.class === 'mounted' || def.class === 'siege' || def.class === 'animal' ? 1.1 : 1.32; ctx.scale(s, s);
     const fly = def.flying ? 1.3 * ZH : 0;
     drawUnit(ctx, 0, fly * 0.5, { def, team, era, face: 0.4, walk: 0.15, act: 0.3, busy: false, carry: -1, id: 1, t: 0 });
     ctx.restore();

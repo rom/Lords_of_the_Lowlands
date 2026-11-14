@@ -143,7 +143,7 @@ func (s *Server) diagAllowed(r *http.Request) bool {
 	if ss, _ := s.sessionFor(r); ss != nil && ss.Admin {
 		return true
 	}
-	if s.set.Metrics.Token == "" {
+	if s.set.Metrics.Token == "" && !s.cfg.TrustProxy { // behind a proxy every request is "loopback"
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err == nil {
 			if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {

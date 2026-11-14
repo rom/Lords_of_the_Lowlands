@@ -1,6 +1,10 @@
 # Lords of the Lowlands server configuration.
-# Every key is optional; omitted keys keep the defaults shown here.
-# Command-line flags override values from this file.
+# Load with `lotl-server -config FILE` or LOTL_CONFIG=FILE.
+# Every key is optional; omitted keys keep the defaults shown here; unknown
+# keys are rejected. Precedence: flag > LOTL_* environment > this file > default.
+# The file is read once at start-up, before the sandbox is applied; changes
+# need a restart. Keep it free of secrets or protect it (0600 / systemd
+# LoadCredential=) if you set metrics.token. Never commit real secrets.
 
 server:
   listen: "127.0.0.1:8080"   # host:port to bind (ignored with systemd socket activation)
