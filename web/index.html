@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lords of the Lowlands</title>
+<meta name="description" content="A historical real-time strategy game from the Dawn Age to interstellar war.">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+<div id="bg"><canvas id="bgview"></canvas></div>
+
+<main id="screens">
+  <header class="logo" id="logo">
+    <div class="crest"></div>
+    <h1>Lords of the Lowlands</h1>
+    <p class="tagline">From the first fire to the farthest stars</p>
+  </header>
+
+  <section id="login" class="screen panel hidden">
+    <h2>Enter the Realm</h2>
+    <div class="tabs">
+      <button class="tab active" data-tab="signin">Sign in</button>
+      <button class="tab" data-tab="register">Register</button>
+      <button class="tab" data-tab="guest">Guest</button>
+    </div>
+    <form id="authform" autocomplete="on">
+      <label>Name <input id="authname" name="username" autocomplete="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_\-]{3,20}"></label>
+      <label id="pwrow">Password <input id="authpw" type="password" name="password" autocomplete="current-password" minlength="8" maxlength="128"></label>
+      <button class="btn primary" type="submit" id="authbtn">Sign in</button>
+      <p class="err" id="autherr"></p>
+    </form>
+    <p class="fine">Guests can play everything; only registered lords appear in the hall of fame and can publish levels.</p>
+  </section>
+
+  <section id="menu" class="screen hidden">
+    <nav class="mainmenu">
+      <button class="btn big" data-go="campaign">Campaign</button>
+      <button class="btn big" data-go="skirmish">Skirmish vs Computer</button>
+      <button class="btn big" data-go="lobby">Multiplayer</button>
+      <a class="btn big" href="editor.html">Level Editor</a>
+      <button class="btn big" data-go="halloffame">Hall of Fame</button>
+      <button class="btn big" data-go="settings">Settings</button>
+      <button class="btn" id="logout">Sign out</button>
+    </nav>
+    <div class="whoami panel" id="whoami"></div>
+  </section>
+
+  <section id="campaign" class="screen panel wide hidden">
+    <h2>The Campaign</h2>
+    <p class="sub">Seventeen chapters of history and beyond. Each begins in one age and lets you advance to the next.</p>
+    <div class="campaign-grid" id="campgrid"></div>
+    <div class="row">
+      <label>Difficulty <select id="campdiff"><option value="">Level default</option><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
+      <button class="btn" data-go="menu">Back</button>
+    </div>
+  </section>
+
+  <section id="skirmish" class="screen panel hidden">
+    <h2>Skirmish</h2>
+    <div class="form-grid">
+      <label>Map <select id="skmap"><option value="random">Random map</option></select></label>
+      <label>Theme <select id="sktheme"></select></label>
+      <label>Size <select id="sksize"><option value="56">Small</option><option value="72" selected>Medium</option><option value="96">Large</option><option value="120">Huge</option></select></label>
+      <label>Water <input id="skwater" type="range" min="0" max="100" value="30"></label>
+      <label>Start age <select id="skstart"></select></label>
+      <label>Final age <select id="skmax"></select></label>
+      <label>Opponents <select id="skopp"><option>1</option><option>2</option><option>3</option><option>5</option><option>7</option></select></label>
+      <label>Difficulty <select id="skdiff"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select></label>
+    </div>
+    <div class="row"><button class="btn primary" id="skgo">Start</button><button class="btn" data-go="menu">Back</button></div>
+  </section>
+
+  <section id="lobby" class="screen panel wide hidden">
+    <h2>Multiplayer Lobby</h2>
+    <div class="lobby-grid">
+      <div>
+        <h3>Battles</h3>
+        <div id="roomlist" class="list"></div>
+        <div class="row">
+          <select id="newlevel"></select>
+          <input id="newname" placeholder="Battle name" maxlength="48">
+          <button class="btn primary" id="create">Create</button>
+        </div>
+      </div>
+      <div>
+        <h3>Lords online</h3>
+        <div id="onlinelist" class="list small"></div>
+      </div>
+    </div>
+    <div class="chatpanel">
+      <div id="lobbychat" class="chatlog"></div>
+      <form id="lobbychatform" class="row"><input id="lobbychatin" maxlength="300" placeholder="Say something to everyone… (/w name message to whisper)"><button class="btn">Send</button></form>
+    </div>
+    <div class="row"><button class="btn" data-go="menu">Back</button></div>
+  </section>
+
+  <section id="room" class="screen panel wide hidden">
+    <h2 id="roomtitle">Battle</h2>
+    <p id="roomlevel" class="sub"></p>
+    <table class="slots"><thead><tr><th>#</th><th>Player</th><th>Team</th><th>Seat</th></tr></thead><tbody id="slots"></tbody></table>
+    <div class="chatpanel">
+      <div id="roomchat" class="chatlog"></div>
+      <form id="roomchatform" class="row"><select id="roomchatch"><option value="room">All</option><option value="team">Team</option></select><input id="roomchatin" maxlength="300" placeholder="Talk to the players in this battle"><button class="btn">Send</button></form>
+    </div>
+    <div class="row"><button class="btn primary" id="startbtn">Start Battle</button><button class="btn" id="leaveroom">Leave</button></div>
+  </section>
+
+  <section id="halloffame" class="screen panel wide hidden">
+    <h2>Hall of Fame</h2>
+    <div class="hof">
+      <div><h3>Greatest Lords</h3><table id="leaders" class="results"></table></div>
+      <div><h3>High Scores <select id="scorelevel"><option value="">All levels</option></select></h3><table id="scoretable" class="results"></table></div>
+    </div>
+    <div class="row"><button class="btn" data-go="menu">Back</button></div>
+  </section>
+
+  <section id="settings" class="screen panel hidden">
+    <h2>Settings</h2>
+    <div class="form-grid">
+      <label>Master volume <input id="vmaster" type="range" min="0" max="100"></label>
+      <label>Effects <input id="vsfx" type="range" min="0" max="100"></label>
+      <label>Music <input id="vmusic" type="range" min="0" max="100"></label>
+      <label class="check"><input id="vmute" type="checkbox"> Mute all</label>
+    </div>
+    <div class="row"><button class="btn" id="settingsback">Back</button></div>
+  </section>
+</main>
+
+<div id="game" class="hidden">
+  <canvas id="view"></canvas>
+  <div id="topbar"><div id="resbar"></div><button id="menubtn" class="btn small">Menu</button></div>
+  <div id="pscores"></div>
+  <div id="toasts"></div>
+  <div id="gamechat"></div>
+  <div id="chatbox"><span id="chatch">All</span><input id="chatinput" maxlength="300" placeholder="Enter to send · Tab to switch channel"></div>
+  <div id="bottombar">
+    <div class="minibox"><canvas id="minimap" width="440" height="440"></canvas></div>
+    <div id="selinfo"></div>
+    <div id="commands"></div>
+  </div>
+  <div id="tooltip" class="hidden"></div>
+</div>
+<div id="overlay" class="hidden"></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

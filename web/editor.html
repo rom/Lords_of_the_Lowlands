@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Level Editor · Lords of the Lowlands</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/editor.css">
+<link rel="icon" href="data:,">
+</head>
+<body class="editor">
+<canvas id="view"></canvas>
+<header id="etop">
+  <a class="btn small" href="/">◂ Game</a>
+  <b class="etitle">Level Editor</b>
+  <button class="btn small" id="enew">New</button>
+  <button class="btn small" id="egen">Generate</button>
+  <select id="eopen"><option value="">Open level…</option></select>
+  <button class="btn small" id="eundo" title="Ctrl+Z">Undo</button>
+  <button class="btn small primary" id="esave">Save to server</button>
+  <button class="btn small" id="eplay">Playtest</button>
+  <button class="btn small" id="edown">Download</button>
+  <label class="btn small upl">Upload<input type="file" id="eup" accept="application/json,.json" hidden></label>
+  <span id="estatus" class="fine"></span>
+</header>
+<aside id="etools" class="panel">
+  <h3>Terrain</h3><div id="tterrain" class="tgrid"></div>
+  <h3>Objects</h3><div id="tobjects" class="tgrid"></div>
+  <h3>Tools</h3><div id="tother" class="tgrid"></div>
+  <h3>Brush</h3>
+  <div class="row left"><select id="ebrush"><option value="0">1×1</option><option value="1" selected>3×3</option><option value="2">5×5</option><option value="4">9×9</option></select>
+  <label class="check"><input type="checkbox" id="egrid" checked> Grid</label></div>
+  <p class="fine">Left drag: paint · Right drag: pan · Wheel: zoom · Start tool: click to add/remove player starts (2-8).</p>
+</aside>
+<aside id="eprops" class="panel">
+  <h3>Level</h3>
+  <label>Name <input id="pname" maxlength="48"></label>
+  <label>Description <textarea id="pdesc" maxlength="600" rows="4"></textarea></label>
+  <label>Theme <select id="ptheme"></select></label>
+  <label>Start age <select id="pstart"></select></label>
+  <label>Final age <select id="pmax"></select></label>
+  <label>Objective <select id="pobj"><option value="conquest">Conquest</option><option value="survive">Survive</option><option value="advance">Advance first</option></select></label>
+  <label id="pminrow">Minutes <input id="pmin" type="number" min="1" max="120" value="15"></label>
+  <label>AI difficulty <select id="pdiff"><option>easy</option><option selected>normal</option><option>hard</option></select></label>
+  <label>Starting resources (F/W/S/G/E)<span class="resrow"><input id="r0" type="number" min="0" max="100000"><input id="r1" type="number" min="0" max="100000"><input id="r2" type="number" min="0" max="100000"><input id="r3" type="number" min="0" max="100000"><input id="r4" type="number" min="0" max="100000"></span></label>
+  <p class="fine" id="pinfo"></p>
+  <p class="err" id="perr"></p>
+</aside>
+<div id="overlay" class="hidden"></div>
+<script type="module" src="js/editor.js"></script>
+</body>
+</html>
