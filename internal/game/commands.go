@@ -457,3 +457,37 @@ func (g *Game) coastal(tx, ty, n int) bool {
 	}
 	return c >= 2
 }
+
+// Exists reports whether an entity id is alive.
+func (g *Game) Exists(id int) bool {
+	e := g.Ents[id]
+	return e != nil && !e.dead
+}
+
+// Knows reports whether a player can legitimately know about an entity
+// (allied, visible, or remembered under the fog rules).
+func (g *Game) Knows(player, id int) bool {
+	e := g.Ents[id]
+	if e == nil || player < 0 || player >= len(g.Players) {
+		return false
+	}
+	return g.canSee(player, e)
+}
+
+// ExploredAt reports whether a player has explored the tile at (x, y).
+func (g *Game) ExploredAt(player int, x, y float64) bool {
+	tx, ty := int(x), int(y)
+	if player < 0 || player >= len(g.Players) || !g.inBounds(tx, ty) || !finite(x) || !finite(y) {
+		return false
+	}
+	return g.Players[player].Explored[ty*g.W+tx]
+}
+
+// OwnerOf returns the owner of a live entity.
+func (g *Game) OwnerOf(id int) (int, bool) {
+	e := g.Ents[id]
+	if e == nil || e.dead {
+		return 0, false
+	}
+	return e.Owner, true
+}

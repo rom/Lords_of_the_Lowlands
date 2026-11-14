@@ -38,9 +38,17 @@ func TestParseFlags(t *testing.T) {
 	if o.listen != "127.0.0.1:7777" {
 		t.Fatal("env", o.listen)
 	}
-	t.Setenv("LOTL_PORT", "abc")
-	if envInt("LOTL_PORT", 5) != 5 || envOr("LOTL_NOPE_X", "d") != "d" {
-		t.Fatal("env helpers")
+	t.Setenv("LOTL_PORT", "")
+	t.Setenv("LOTL_LISTEN", "")
+	// YAML config file, overridden by flags
+	f := filepath.Join(t.TempDir(), "lotl.yaml")
+	os.WriteFile(f, []byte("server:\n  listen: \"0.0.0.0:7000\"\n  maxRooms: 9\naccounts:\n  registration: closed\n"), 0o600)
+	o, err = parseFlags([]string{"-config", f, "-max-rooms", "11", "-trust-proxy", "-secure-cookies", "-allow-origin", "a.example,,b.example", "-no-sandbox", "-data", "/tmp/x", "-log-level", "debug"})
+	if err != nil || o.listen != "0.0.0.0:7000" || o.maxRooms != 11 || o.cfg.Accounts.Registration != "closed" || !o.trustProxy || !o.noSandbox || o.origins != "a.example,b.example" {
+		t.Fatalf("config+flags: %+v %v", o, err)
+	}
+	if _, err := parseFlags([]string{"-config", "/nonexistent.yaml"}); err == nil {
+		t.Fatal("missing config")
 	}
 }
 

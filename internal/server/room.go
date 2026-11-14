@@ -34,9 +34,11 @@ type Slot struct {
 	Name   string `json:"name,omitempty"`
 	Team   int    `json:"team"`
 	Diff   string `json:"diff,omitempty"`
-	client *Client
-	player int
-	guest  bool
+	Reserved bool `json:"reserved,omitempty"` // seat of a restored game
+	client   *Client
+	player   int
+	guest    bool
+	flagged  bool // removed by anti-cheat; results not recorded
 }
 
 // Room is a lobby room that becomes a match.
@@ -55,6 +57,12 @@ type Room struct {
 	stopOnce sync.Once
 	started  time.Time
 	tickDur  time.Duration
+	// Demo rooms are AI-only matches watched by idle clients (attract mode).
+	Demo       bool
+	spectators []*Client
+	demoUntil  time.Time
+	// restored holds a loaded save until the room starts.
+	restored *game.Game
 }
 
 type roomSummary struct {
@@ -285,11 +293,21 @@ func (h *Hub) leaveRoom(c *Client, r *Room, explicit bool) {
 	h.mu.Unlock()
 	r.mu.Lock()
 	humans := 0
+	for i, sp := range r.spectators {
+		if sp == c {
+			r.spectators = append(r.spectators[:i], r.spectators[i+1:]...)
+			break
+		}
+	}
+	humans += len(r.spectators)
 	for _, s := range r.Slots {
 		if s.client == c {
 			s.client = nil
 			if r.State == StateLobby {
-				s.Kind, s.Name = SlotOpen, ""
+				s.Kind = SlotOpen
+				if !s.Reserved {
+					s.Name = ""
+				}
 			} else if explicit && r.g != nil && r.State == StatePlaying {
 				r.g.Resign(s.player)
 			}
@@ -425,16 +443,37 @@ func (r *Room) startLocked() error {
 		seats = append(seats, s)
 		teams[s.Team] = true
 	}
-	if len(setups) < 2 {
+	if len(setups) < 2 && r.restored == nil {
 		return errors.New("need at least two players (add an AI)")
 	}
-	if len(teams) < 2 {
+	if len(teams) < 2 && r.restored == nil {
 		return errors.New("everyone is on the same team")
 	}
-	g, err := game.NewGame(r.Level, setups, time.Now().UnixNano())
-	if err != nil {
+	var g *game.Game
+	var err error
+	if r.restored != nil {
+		g = r.restored
+		// every seat of a save maps to its original player index; seats
+		// nobody took over are played by the computer
+		seats = seats[:0]
+		for i, s := range r.Slots {
+			p := g.Players[i]
+			if s.Kind == SlotHuman && s.client != nil {
+				p.SetController(s.Name, false, "")
+			} else {
+				if s.Kind != SlotAI {
+					s.Kind, s.Diff = SlotAI, "normal"
+				}
+				p.SetController(p.Name, true, s.Diff)
+			}
+			seats = append(seats, s)
+		}
+		r.restored = nil
+		r.hub.s.metrics.restores.Add(1)
+	} else if g, err = game.NewGame(r.Level, setups, time.Now().UnixNano()); err != nil {
 		return err
 	}
+	r.hub.s.metrics.gamesStarted.Add(1)
 	for i, s := range seats {
 		s.player = i
 	}
@@ -541,14 +580,34 @@ func (r *Room) loop() {
 // tick applies commands, advances the simulation and sends snapshots.
 // It returns true when the game is over.
 func (r *Room) tick(cmds []game.Command) bool {
+	start := time.Now()
+	m := r.hub.s.metrics
+	type finding struct {
+		c      *Client
+		reason string
+		w      float64
+	}
+	var findings []finding
 	r.mu.Lock()
 	g := r.g
+	clientOf := func(player int) *Client {
+		for _, s := range r.Slots {
+			if s.player == player && s.client != nil && s.Kind == SlotHuman {
+				return s.client
+			}
+		}
+		return nil
+	}
 	for _, c := range cmds {
+		m.commands.Add(1)
+		cl := clientOf(c.Player)
+		if why, w := inspectCommand(g, c); w > 0 && cl != nil {
+			findings = append(findings, finding{cl, why, w})
+		}
 		if err := g.Apply(c); err != nil {
-			for _, s := range r.Slots {
-				if s.player == c.Player && s.client != nil && s.Kind == SlotHuman {
-					s.client.sendJSON(map[string]string{"t": "cmderr", "msg": err.Error()}, true)
-				}
+			m.cmdRejected.Add(1)
+			if cl != nil {
+				cl.sendJSON(map[string]string{"t": "cmderr", "msg": err.Error()}, true)
 			}
 		}
 	}
@@ -561,16 +620,33 @@ func (r *Room) tick(cmds []game.Command) bool {
 		}
 		snap := g.Snapshot(s.player, ev, fog)
 		s.client.sendJSON(map[string]interface{}{"t": "snap", "s": snap}, true)
+		m.snapshots.Add(1)
+	}
+	if len(r.spectators) > 0 {
+		b, _ := json.Marshal(map[string]interface{}{"t": "snap", "s": g.Snapshot(-1, ev, false)})
+		for _, c := range r.spectators {
+			c.enqueue(b, true)
+			m.snapshots.Add(1)
+		}
 	}
 	over := g.Over
+	rotate := r.Demo && (over || time.Now().After(r.demoUntil))
 	var results []game.Result
-	if over {
+	if over && !r.Demo {
 		r.State = StateDone
 		results = g.Results()
 		r.broadcastLocked(map[string]interface{}{"t": "end", "results": results, "winner": g.Winner}, false)
 	}
 	r.mu.Unlock()
+	m.ObserveTick(time.Since(start))
+	for _, f := range findings {
+		r.hub.report(f.c, f.reason, f.w)
+	}
+	if rotate {
+		return !r.hub.nextDemo(r)
+	}
 	if over {
+		m.gamesEnded.Add(1)
 		r.record(results)
 	}
 	return over
@@ -583,8 +659,8 @@ func (r *Room) record(results []game.Result) {
 	r.mu.Lock()
 	guests := map[string]bool{}
 	for _, s := range r.Slots {
-		if s.Kind == SlotHuman && s.guest {
-			guests[strings.ToLower(s.Name)] = true
+		if s.Kind == SlotHuman && (s.guest || s.flagged) {
+			guests[strings.ToLower(s.Name)] = true // not recorded
 		}
 	}
 	r.mu.Unlock()

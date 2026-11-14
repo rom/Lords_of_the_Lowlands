@@ -4,8 +4,6 @@
 package server
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rom/lords_of_the_lowlands/internal/config"
 	"github.com/rom/lords_of_the_lowlands/internal/game"
 	"github.com/rom/lords_of_the_lowlands/internal/levels"
 	"github.com/rom/lords_of_the_lowlands/internal/store"
@@ -33,19 +32,14 @@ type Config struct {
 	// state-changing requests (the request Host is always accepted).
 	AllowedOrigins []string
 	MaxRooms       int
+	// Settings holds the YAML configuration (defaults when nil).
+	Settings *config.Config
+	// StaticHashes maps client file paths to SHA-256 hex digests (anti-cheat
+	// integrity check); computed from Static when nil.
+	StaticHashes map[string]string
 }
 
-const (
-	sessionCookie = "lotl_session"
-	sessionTTL    = 7 * 24 * time.Hour
-	maxBody       = 1 << 20
-)
-
-type session struct {
-	Name    string
-	Guest   bool
-	Expires time.Time
-}
+const sessionCookie = "lotl_session"
 
 // Server is the game back-end.
 type Server struct {
@@ -58,6 +52,9 @@ type Server struct {
 	hub       *Hub
 	mux       *http.ServeMux
 	now       func() time.Time
+	set       *config.Config
+	metrics   *Metrics
+	started   time.Time
 }
 
 // New creates a server.
@@ -68,13 +65,24 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	if cfg.MaxRooms == 0 {
-		cfg.MaxRooms = 200
+	if cfg.Settings == nil {
+		cfg.Settings = config.Default()
 	}
-	s := &Server{cfg: cfg, log: cfg.Logger, sessions: map[string]*session{},
-		apiLimit: NewLimiter(20, 60), authLimit: NewLimiter(0.2, 8), now: time.Now}
+	set := cfg.Settings
+	if cfg.MaxRooms == 0 {
+		cfg.MaxRooms = set.Server.MaxRooms
+	}
+	if cfg.StaticHashes == nil && cfg.Static != nil {
+		cfg.StaticHashes = hashStatic(cfg.Static)
+	}
+	s := &Server{cfg: cfg, log: cfg.Logger, sessions: map[string]*session{}, set: set,
+		apiLimit: NewLimiter(set.Security.APIRate, set.Security.APIBurst), authLimit: NewLimiter(set.Security.AuthRate, set.Security.AuthBurst),
+		now: time.Now, metrics: newMetrics(), started: time.Now()}
 	s.hub = newHub(s)
 	s.routes()
+	if err := s.bootstrapAdmin(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -84,6 +92,24 @@ func (s *Server) Hub() *Hub { return s.hub }
 func (s *Server) routes() {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
+	m.HandleFunc("GET /readyz", s.handleReady)
+	m.HandleFunc("GET /api/health", s.handleHealth)
+	m.HandleFunc("GET /api/stats", s.handleStats)
+	m.HandleFunc("GET /metrics", s.handleMetrics)
+	m.HandleFunc("GET /api/config", s.handlePublicConfig)
+	m.HandleFunc("POST /api/mfa/setup", s.handleMFASetup)
+	m.HandleFunc("POST /api/mfa/enable", s.handleMFAEnable)
+	m.HandleFunc("POST /api/mfa/disable", s.handleMFADisable)
+	m.HandleFunc("GET /api/saves", s.handleSaves)
+	m.HandleFunc("DELETE /api/saves/{id}", s.handleDeleteSave)
+	m.HandleFunc("GET /api/admin/users", s.admin(s.handleAdminUsers))
+	m.HandleFunc("POST /api/admin/users", s.admin(s.handleAdminCreate))
+	m.HandleFunc("PATCH /api/admin/users/{name}", s.admin(s.handleAdminUpdate))
+	m.HandleFunc("POST /api/admin/users/{name}/password", s.admin(s.handleAdminPassword))
+	m.HandleFunc("DELETE /api/admin/users/{name}", s.admin(s.handleAdminDelete))
+	m.HandleFunc("GET /api/admin/audit", s.admin(s.handleAdminAudit))
+	m.HandleFunc("GET /api/admin/rooms", s.admin(s.handleAdminRooms))
+	m.HandleFunc("POST /api/admin/kick/{name}", s.admin(s.handleAdminKick))
 	m.HandleFunc("POST /api/register", s.handleRegister)
 	m.HandleFunc("POST /api/login", s.handleLogin)
 	m.HandleFunc("POST /api/guest", s.handleGuest)
@@ -119,7 +145,7 @@ func init() {
 
 // Handler returns the HTTP handler with all middleware applied.
 func (s *Server) Handler() http.Handler {
-	return s.recoverer(s.securityHeaders(s.limit(s.mux)))
+	return s.recoverer(s.instrument(s.securityHeaders(s.limit(s.mux))))
 }
 
 func (s *Server) recoverer(next http.Handler) http.Handler {
@@ -175,7 +201,7 @@ func (s *Server) limit(next http.Handler) http.Handler {
 					writeErr(w, http.StatusUnsupportedMediaType, "content-type must be application/json")
 					return
 				}
-				r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+				r.Body = http.MaxBytesReader(w, r.Body, s.set.Security.MaxBodyBytes)
 			}
 		}
 		next.ServeHTTP(w, r)
@@ -233,155 +259,6 @@ func decode(r *http.Request, v interface{}) error {
 		return errors.New("trailing data")
 	}
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Sessions
-
-func newToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func (s *Server) createSession(w http.ResponseWriter, name string, guest bool) {
-	tok := newToken()
-	s.mu.Lock()
-	now := s.now()
-	for k, v := range s.sessions {
-		if now.After(v.Expires) {
-			delete(s.sessions, k)
-		}
-	}
-	s.sessions[tok] = &session{Name: name, Guest: guest, Expires: now.Add(sessionTTL)}
-	s.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
-		Secure: s.cfg.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds())})
-}
-
-// sessionFor returns the session of a request, if any.
-func (s *Server) sessionFor(r *http.Request) (*session, string) {
-	c, err := r.Cookie(sessionCookie)
-	if err != nil || len(c.Value) != 43 {
-		return nil, ""
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ss := s.sessions[c.Value]
-	if ss == nil || s.now().After(ss.Expires) {
-		delete(s.sessions, c.Value)
-		return nil, ""
-	}
-	cp := *ss
-	return &cp, c.Value
-}
-
-func (s *Server) nameInUse(name string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	for _, v := range s.sessions {
-		if strings.EqualFold(v.Name, name) && now.Before(v.Expires) {
-			return true
-		}
-	}
-	return false
-}
-
-type credentials struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.authLimit.Allow(clientIP(r, s.cfg.TrustProxy)) {
-		writeErr(w, http.StatusTooManyRequests, "too many attempts, try later")
-		return
-	}
-	var c credentials
-	if err := decode(r, &c); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if s.nameInUse(c.Name) {
-		writeErr(w, http.StatusConflict, store.ErrExists.Error())
-		return
-	}
-	u, err := s.cfg.Store.Register(c.Name, c.Password)
-	if err != nil {
-		code := http.StatusBadRequest
-		if errors.Is(err, store.ErrExists) {
-			code = http.StatusConflict
-		}
-		writeErr(w, code, err.Error())
-		return
-	}
-	s.createSession(w, u.Name, false)
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"name": u.Name, "guest": false})
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.authLimit.Allow(clientIP(r, s.cfg.TrustProxy)) {
-		writeErr(w, http.StatusTooManyRequests, "too many attempts, try later")
-		return
-	}
-	var c credentials
-	if err := decode(r, &c); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	u, err := s.cfg.Store.Authenticate(c.Name, c.Password)
-	if err != nil {
-		writeErr(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-	s.createSession(w, u.Name, false)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"name": u.Name, "guest": false})
-}
-
-func (s *Server) handleGuest(w http.ResponseWriter, r *http.Request) {
-	var c struct {
-		Name string `json:"name"`
-	}
-	if err := decode(r, &c); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !store.ValidName(c.Name) {
-		writeErr(w, http.StatusBadRequest, store.ErrBadName.Error())
-		return
-	}
-	if s.cfg.Store.Exists(c.Name) || s.nameInUse(c.Name) {
-		writeErr(w, http.StatusConflict, "name is registered or in use")
-		return
-	}
-	s.createSession(w, c.Name, true)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"name": c.Name, "guest": true})
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if _, tok := s.sessionFor(r); tok != "" {
-		s.mu.Lock()
-		delete(s.sessions, tok)
-		s.mu.Unlock()
-	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	ss, _ := s.sessionFor(r)
-	if ss == nil {
-		writeErr(w, http.StatusUnauthorized, "not logged in")
-		return
-	}
-	out := map[string]interface{}{"name": ss.Name, "guest": ss.Guest}
-	if u, ok := s.cfg.Store.User(ss.Name); ok {
-		out["stats"] = u
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 // ---------------------------------------------------------------------------

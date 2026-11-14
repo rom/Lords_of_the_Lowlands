@@ -54,6 +54,7 @@ var (
 	ErrNotFound    = errors.New("not found")
 	ErrForbidden   = errors.New("forbidden")
 	ErrLimit       = errors.New("limit reached")
+	ErrInvalid     = errors.New("invalid value")
 )
 
 // User is a registered account.
@@ -67,7 +68,69 @@ type User struct {
 	Losses    int       `json:"losses"`
 	BestScore int       `json:"bestScore"`
 	Campaign  int       `json:"campaign"` // highest campaign level completed
+	Role      string    `json:"role,omitempty"`   // "user" or "admin"
+	Status    string    `json:"status,omitempty"` // active, pending, blocked
+	// TOTP multi-factor authentication.
+	MFASecret   string    `json:"mfaSecret,omitempty"`
+	MFAEnabled  bool      `json:"mfaEnabled,omitempty"`
+	MFARequired bool      `json:"mfaRequired,omitempty"`
+	MFALastStep int64     `json:"mfaLastStep,omitempty"`
+	LastLogin   time.Time `json:"lastLogin,omitempty"`
+	Flags       []Flag    `json:"flags,omitempty"` // anti-cheat findings
+	Note        string    `json:"note,omitempty"`
 }
+
+// Flag is an anti-cheat finding recorded against an account.
+type Flag struct {
+	Time   time.Time `json:"time"`
+	Reason string    `json:"reason"`
+	Score  float64   `json:"score"`
+	Game   string    `json:"game"`
+}
+
+// Roles and statuses.
+const (
+	RoleUser      = "user"
+	RoleAdmin     = "admin"
+	StatusActive  = "active"
+	StatusPending = "pending"
+	StatusBlocked = "blocked"
+)
+
+// AdminUser is the administrator's view of an account (no secrets).
+type AdminUser struct {
+	PublicUser
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+	Created     time.Time `json:"created"`
+	LastLogin   time.Time `json:"lastLogin"`
+	MFAEnabled  bool      `json:"mfaEnabled"`
+	MFARequired bool      `json:"mfaRequired"`
+	Flags       []Flag    `json:"flags"`
+	Note        string    `json:"note"`
+}
+
+func (u *User) role() string {
+	if u.Role == "" {
+		return RoleUser
+	}
+	return u.Role
+}
+
+func (u *User) status() string {
+	if u.Status == "" {
+		return StatusActive
+	}
+	return u.Status
+}
+
+// Admin returns the administrator view.
+func (u *User) Admin() AdminUser {
+	return AdminUser{u.Public(), u.role(), u.status(), u.Created, u.LastLogin, u.MFAEnabled, u.MFARequired, u.Flags, u.Note}
+}
+
+// IsAdmin reports whether the account is an active administrator.
+func (u *User) IsAdmin() bool { return u.role() == RoleAdmin && u.status() == StatusActive }
 
 // PublicUser is the externally visible part of a User.
 type PublicUser struct {
@@ -201,11 +264,22 @@ func hashPassword(pw string, salt []byte) []byte {
 
 // Register creates an account.
 func (s *Store) Register(name, pw string) (*User, error) {
+	return s.CreateUser(name, pw, RoleUser, StatusActive, MinPasswordLen)
+}
+
+// CreateUser creates an account with a role and status.
+func (s *Store) CreateUser(name, pw, role, status string, minLen int) (*User, error) {
 	if !ValidName(name) {
 		return nil, ErrBadName
 	}
-	if len(pw) < MinPasswordLen || len(pw) > MaxPasswordLen {
+	if minLen < MinPasswordLen {
+		minLen = MinPasswordLen
+	}
+	if len(pw) < minLen || len(pw) > MaxPasswordLen {
 		return nil, ErrBadPassword
+	}
+	if !validRole(role) || !validStatus(status) {
+		return nil, ErrInvalid
 	}
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -218,13 +292,14 @@ func (s *Store) Register(name, pw string) (*User, error) {
 	if _, ok := s.users[key]; ok {
 		return nil, ErrExists
 	}
-	u := &User{Name: name, Salt: salt, Hash: h, Created: time.Now().UTC()}
+	u := &User{Name: name, Salt: salt, Hash: h, Created: time.Now().UTC(), Role: role, Status: status}
 	s.users[key] = u
 	if err := s.save("users.json", s.users); err != nil {
 		delete(s.users, key)
 		return nil, err
 	}
-	return u, nil
+	cp := *u
+	return &cp, nil
 }
 
 // dummySalt is used to equalise timing for unknown users.
@@ -246,7 +321,10 @@ func (s *Store) Authenticate(name, pw string) (*User, error) {
 	if subtle.ConstantTimeCompare(hashPassword(pw, u.Salt), u.Hash) != 1 {
 		return nil, ErrAuth
 	}
-	return u, nil
+	s.mu.RLock()
+	cp := *u
+	s.mu.RUnlock()
+	return &cp, nil
 }
 
 // User returns the public record of a user.

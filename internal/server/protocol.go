@@ -40,11 +40,22 @@ type ClientMsg struct {
 	Opp      int                     `json:"opp,omitempty"`
 	Cmd      *game.Command           `json:"cmd,omitempty"`
 	Skirmish *levels.SkirmishOptions `json:"skirmish,omitempty"`
+	// Signed command: payload P (JSON of a game.Command), sequence N and
+	// HMAC Mac over "N:P" with the per-connection key.
+	P   string `json:"p,omitempty"`
+	N   int64  `json:"n,omitempty"`
+	Mac string `json:"mac,omitempty"`
+	// Integrity report: module path -> SHA-256 hex; automation flag.
+	Hashes     map[string]string `json:"h,omitempty"`
+	Automation bool              `json:"wd,omitempty"`
+	// Save/restore.
+	Save string `json:"save,omitempty"`
 }
 
 var validTypes = map[string]bool{
 	"chat": true, "create": true, "join": true, "leave": true, "slot": true, "team": true,
-	"start": true, "quick": true, "cmd": true, "ping": true,
+	"start": true, "quick": true, "cmd": true, "ping": true, "integrity": true, "save": true,
+	"restore": true, "demo": true,
 }
 
 func validDiffName(d string) bool { return game.ValidDifficulty(d) }
@@ -97,6 +108,16 @@ func ParseClientMsg(b []byte) (*ClientMsg, error) {
 			return nil, errors.New("bad slot kind")
 		}
 	case "cmd":
+		if m.P != "" {
+			if len(m.Mac) != 64 || m.N <= 0 {
+				return nil, errors.New("bad signature")
+			}
+			var c game.Command
+			if err := json.Unmarshal([]byte(m.P), &c); err != nil {
+				return nil, errors.New("malformed command")
+			}
+			m.Cmd = &c
+		}
 		if m.Cmd == nil {
 			return nil, errors.New("missing command")
 		}
@@ -105,6 +126,24 @@ func ParseClientMsg(b []byte) (*ClientMsg, error) {
 		}
 		if len(m.Cmd.What) > 40 || strings.ContainsAny(m.Cmd.What, "<>\"'\\") {
 			return nil, errors.New("bad command argument")
+		}
+	case "integrity":
+		if len(m.Hashes) > 64 {
+			return nil, errors.New("too many hashes")
+		}
+		for k, v := range m.Hashes {
+			if len(k) > 64 || len(v) != 64 {
+				return nil, errors.New("bad hash")
+			}
+		}
+	case "save":
+		m.Name = game.CleanText(m.Name, game.MaxNameLen)
+		if m.Name == "" {
+			m.Name = "Saved game"
+		}
+	case "restore":
+		if len(m.Save) != 18 {
+			return nil, errors.New("bad save id")
 		}
 	case "quick":
 		if m.Skirmish != nil {
