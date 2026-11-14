@@ -89,7 +89,7 @@ All game scenes are real matches played by computer opponents (saved and restore
 | ![Tech tree](docs/screenshots/techtree.png) | ![Manual](docs/screenshots/manual.png) |
 | *Your own tech tree (`F2`): every age, unit line and technology* | *The user manual and FAQ, built into the game (`F4`)* |
 | ![Level editor](docs/screenshots/editor.png) | ![Demo mode](docs/screenshots/demo.png) |
-| *The level editor* | *Demo mode: the game plays itself when nobody is at the keyboard* |
+| *The level editor* | *Demo mode: the game plays itself when nobody is at the keyboard (here: an alien world)* |
 | ![Lobby](docs/screenshots/lobby.png) | ![Room](docs/screenshots/room.png) |
 | *Multiplayer lobby with global chat* | *A battle room: humans and AI, teams, seats and map size* |
 | ![Administration](docs/screenshots/admin.png) | ![Health & performance](docs/screenshots/admin-stats.png) |
