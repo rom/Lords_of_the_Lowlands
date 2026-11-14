@@ -261,12 +261,10 @@ Every second (`think`) it runs four planners:
 
 | Planner | Behaviour |
 |---|---|
-| economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 35/25/10/18/12 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5 s (`Tick % 50 == 0`) one worker moves from the most over-stocked to the scarcest resource¹; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
+| economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 35/25/10/18/12 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5th `think` (every 5 s) one worker moves from the most over-stocked to the scarcest resource; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
 | construction | houses when within 6 of the cap; drop-off camps when a resource is > 9 tiles from one; a fixed build plan (barracks, range, academy, stable, workshop, tower, generator, then second barracks/range/stable) gated by age and worker count; more farms when wild food runs out |
 | research | advance the age when it has ≥ `10 + age` workers and can pay; otherwise academy techs in the order gather → attack → armor → hp, keeping half the next age cost in reserve |
 | military | trains the best unit at every military building (≤ 2 queued), saving for the next age once a minimum army exists; defends against visible enemies within 14 tiles of its town centre; after minute 4, when the army reaches the attack size (+ age/2), it stages at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; when the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2 |
-
-¹ The rebalance runs every 5th `think` call of each AI (a per-AI counter), so every AI player rebalances regardless of its staggered think tick.
 
 If its town centre is lost the AI tries to rebuild one with any surviving
 worker. In campaign quick games all AI opponents share team 2 against the
