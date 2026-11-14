@@ -1,7 +1,9 @@
 // Isometric renderer: procedural terrain chunks, animated water, entities,
 // effects, fog of war and minimap.
 import { TW, TH, ZH, TEAM, iso, fbm, vnoise, hash2, clamp, shade } from './util.js';
-import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P } from './sprites.js';
+import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite } from './sprites.js';
+import { decorateChunk } from './art/terrain.js';
+import { isFootUnit } from './art/units.js';
 
 const CH = 8; // chunk size in tiles
 const T_WATER = 3, T_MTN = 4, T_SHALLOW = 5;
@@ -17,6 +19,10 @@ export class Renderer {
     this.shots = [];
     this.flashes = [];
     this.texts = [];
+    this.corpses = [];   // short-lived client-side death animations
+    this.decals = [];    // scorch marks and rubble that fade out
+    this.birds = null;
+    this.lastEnts = null;
     this.time = 0;
     this.defs = null;
     this.waterPattern = makeWaterPattern();
@@ -190,6 +196,7 @@ export class Renderer {
       }
     }
     ctx.putImageData(img, 0, 0);
+    decorateChunk(ctx, this, x0, y0, CH, ox, oy);
     // soft water mask (for animated waves) and shore foam mask
     let water = null, foam = null;
     if (mimg) {
@@ -228,11 +235,13 @@ export class Renderer {
 
   // pre-built rock sprites for mountain tiles
   buildRocks() {
-    this.rocks = [];
+    this.rocks = []; this.rockRows = [];
     const { w, h, tiles } = this;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       if (tiles[y * w + x] !== T_MTN) continue;
-      this.rocks.push({ x: x + 0.5, y: y + 0.5, v: Math.floor(hash2(x, y, 7) * 6) });
+      const r = { x: x + 0.5, y: y + 0.5, v: Math.floor(hash2(x, y, 7) * 6) };
+      this.rocks.push(r);
+      (this.rockRows[y] || (this.rockRows[y] = [])).push(r);
     }
   }
 
@@ -273,6 +282,7 @@ export class Renderer {
     const [ix, iy] = iso(wx, wy);
     return [(ix - this.camX) * this.zoom + this.W / 2, (iy - z * ZH - this.camY) * this.zoom + this.H / 2];
   }
+  toWorldIso(ix, iy) { const a = ix / (TW / 2), b = iy / (TH / 2); return [(a + b) / 2, (b - a) / 2]; }
   toWorld(sx, sy) {
     const ix = (sx - this.W / 2) / this.zoom + this.camX, iy = (sy - this.H / 2) / this.zoom + this.camY;
     const a = ix / (TW / 2), b = iy / (TH / 2);
@@ -301,26 +311,63 @@ export class Renderer {
         this.shots.push({ x: ev.x, y: ev.y, tx: ev.tx, ty: ev.ty, p: ev.p, t0: t, d: Math.max(0.08, ev.d), arc });
         if (['bullet', 'shell', 'cannonball', 'rail', 'laser', 'plasma', 'ion', 'rocket', 'missile'].includes(ev.p)) this.flashes.push({ x: ev.x, y: ev.y, t0: t, d: 0.08, r: ev.p === 'shell' || ev.p === 'cannonball' ? 14 : 7, c: ev.p === 'laser' || ev.p === 'ion' ? '120,240,255' : ev.p === 'plasma' ? '255,120,240' : '255,220,140' });
         if (ev.p === 'cannonball' || ev.p === 'shell') for (let i = 0; i < 6; i++) this.puff(ev.x, ev.y, 0.3, 'smoke');
+        if (ev.p === 'bullet' || ev.p === 'cannonball' || ev.p === 'shell') {
+          // muzzle smoke drifting from the barrel
+          const dx = ev.tx - ev.x, dy = ev.ty - ev.y, l = Math.hypot(dx, dy) || 1;
+          for (let i = 0; i < (ev.p === 'bullet' ? 2 : 4); i++) { const p = this.puff(ev.x + dx / l * 0.35, ev.y + dy / l * 0.35, 0.05, 'gunsmoke'); if (p) { p.z = 0.45; p.vx += dx / l * 0.5; p.vy += dy / l * 0.5; } }
+        }
         break;
       }
       case 'boom': {
         this.flashes.push({ x: ev.x, y: ev.y, t0: t, d: 0.25, r: 22 + ev.d * 18, c: '255,190,90' });
         for (let i = 0; i < 18; i++) this.puff(ev.x, ev.y, ev.d * 0.6, i % 3 ? 'smoke' : 'fire');
+        for (let i = 0; i < 8; i++) this.puff(ev.x, ev.y, 0.1, 'debris');
+        this.addDecal({ k: 'scorch', x: ev.x, y: ev.y, r: 0.35 + (ev.d || 0) * 0.5, life: 10 });
         break;
       }
       case 'death': {
         for (let i = 0; i < 6; i++) this.puff(ev.x, ev.y, 0.2, 'dust');
+        this.addCorpse(ev, defs);
         break;
       }
       case 'collapse': {
         for (let i = 0; i < 30 * (ev.d || 1); i++) this.puff(ev.x + (Math.random() - 0.5) * ev.d, ev.y + (Math.random() - 0.5) * ev.d, ev.d * 0.4, i % 4 ? 'dust' : 'fire');
+        for (let i = 0; i < 10 * (ev.d || 1); i++) this.puff(ev.x, ev.y, ev.d * 0.3, 'debris');
+        this.addDecal({ k: 'rubble', x: ev.x, y: ev.y, s: ev.d || 1, life: 16, v: Math.floor(Math.random() * 4) });
         break;
       }
       case 'melee': for (let i = 0; i < 3; i++) this.puff(ev.x, ev.y, 0.1, 'spark'); break;
-      case 'work': this.puff(ev.x, ev.y, 0.15, ev.p === 'tree' ? 'chip' : ev.p === 'gold' ? 'gold' : 'dust'); break;
+      case 'work': {
+        const k = { tree: 'chip', gold: 'gold', stone: 'grit', crystal: 'shard', berry: 'leaf', farm: 'leaf', carcass: 'grit' }[ev.p] || 'dust';
+        for (let i = 0; i < (k === 'dust' ? 1 : 3); i++) this.puff(ev.x, ev.y, 0.15, k);
+        break;
+      }
+      case 'hammer': if (Math.random() < 0.5) this.puff(ev.x, ev.y, 0.4, 'dust'); break;
       case 'built': for (let i = 0; i < 14; i++) this.puff(ev.x, ev.y, 1, 'dust'); break;
       case 'age': this.texts.push({ x: ev.x, y: ev.y, t0: t, d: 3, s: '★ ' + (defs ? defs.ages[ev.d].name : 'New Age') + ' ★', c: '#ffd86a' }); break;
     }
+  }
+
+  addDecal(d) {
+    d.t0 = this.time;
+    if (this.decals.length > 60) this.decals.shift();
+    this.decals.push(d);
+  }
+
+  // a unit died: keep a short-lived falling / fading copy of it
+  addCorpse(ev, defs) {
+    let best = null, bd = 1.2;
+    if (this.lastEnts) for (const e of this.lastEnts) {
+      if (e.k !== 0 || e.t !== ev.p || e.o !== ev.o) continue;
+      const d = Math.abs(e.x - ev.x) + Math.abs(e.y - ev.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    const def = best ? best.def : defs && defs.units ? defs.units[ev.p] : null;
+    if (!def || def.class === 'animal') return;
+    if (this.corpses.length > 80) this.corpses.shift();
+    const foot = isFootUnit(def) || def.class === 'mounted';
+    this.corpses.push({ x: ev.x, y: ev.y, def, team: ev.o, f: best ? best.f || 0 : Math.random() * 6.28, id: best ? best.i : 0, t0: this.time, foot, side: Math.random() < 0.5 ? -1 : 1 });
+    if (!foot) for (let i = 0; i < 10; i++) this.puff(ev.x, ev.y, 0.25, i % 2 ? 'smoke' : 'fire');
   }
 
   puff(x, y, r, kind) {
@@ -328,11 +375,14 @@ export class Renderer {
     const p = { x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, z: 0.1, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6, vz: 0.5 + Math.random(), life: 1, kind, t0: this.time };
     switch (kind) {
       case 'smoke': p.vz = 0.6 + Math.random() * 0.5; p.life = 1.6 + Math.random(); p.size = 5 + Math.random() * 6; break;
+      case 'gunsmoke': p.vz = 0.25 + Math.random() * 0.2; p.vx *= 0.4; p.vy *= 0.4; p.life = 1.1 + Math.random() * 0.6; p.size = 2.5 + Math.random() * 2; break;
       case 'chimney': p.vz = 0.5; p.vx = 0.15; p.vy = -0.05; p.life = 3; p.size = 4; break;
       case 'fire': p.vz = 1.2; p.life = 0.5 + Math.random() * 0.4; p.size = 4 + Math.random() * 5; break;
       case 'dust': p.vz = 0.3 + Math.random() * 0.4; p.life = 0.9 + Math.random() * 0.6; p.size = 4 + Math.random() * 5; break;
+      case 'kick': p.z = 0.02; p.vz = 0.15 + Math.random() * 0.15; p.vx *= 0.3; p.vy *= 0.3; p.life = 0.6 + Math.random() * 0.3; p.size = 2 + Math.random() * 2; break;
       case 'spark': p.vz = 1.5; p.vx *= 3; p.vy *= 3; p.life = 0.25; p.size = 1.5; break;
-      case 'chip': case 'gold': p.vz = 1.4; p.vx *= 2.5; p.vy *= 2.5; p.life = 0.45; p.size = 1.6; break;
+      case 'chip': case 'gold': case 'grit': case 'shard': case 'leaf': p.vz = 1.4; p.vx *= 2.5; p.vy *= 2.5; p.life = kind === 'leaf' ? 0.8 : 0.45; p.size = 1.6; p.rot = Math.random() * 6.28; break;
+      case 'debris': p.vz = 2 + Math.random() * 1.5; p.vx *= 4; p.vy *= 4; p.life = 0.9; p.size = 1.5 + Math.random() * 1.5; p.rot = Math.random() * 6.28; break;
       case 'campfire': p.vz = 0.9 + Math.random() * 0.4; p.vx *= 0.15; p.vy *= 0.15; p.life = 0.55; p.size = 3 + Math.random() * 3; break;
     }
     if (this.particles.length >= 1500) return null;
@@ -345,12 +395,25 @@ export class Renderer {
     for (let i = ps.length - 1; i >= 0; i--) {
       const p = ps[i];
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      if (p.kind === 'spark' || p.kind === 'chip' || p.kind === 'gold') p.vz -= 6 * dt;
+      const k = p.kind;
+      if (k === 'spark' || k === 'chip' || k === 'gold' || k === 'grit' || k === 'shard' || k === 'debris') p.vz -= 6 * dt;
+      else if (k === 'leaf') { p.vz -= 3 * dt; if (p.vz < -0.4) p.vz = -0.4; p.vx = Math.sin((this.time - p.t0) * 9 + p.rot) * 0.5; }
       if (this.time - p.t0 > p.life || p.z < -0.05) ps.splice(i, 1);
     }
-    this.shots = this.shots.filter(s => this.time - s.t0 < s.d);
-    this.flashes = this.flashes.filter(f => this.time - f.t0 < f.d);
-    this.texts = this.texts.filter(f => this.time - f.t0 < f.d);
+    const t = this.time;
+    for (const s of this.shots) {
+      if (t - s.t0 < s.d) continue;
+      // impact effects when heavy projectiles land
+      if (s.p === 'cannonball' || s.p === 'shell' || s.p === 'boulder' || s.p === 'stone') {
+        for (let i = 0; i < (s.p === 'stone' ? 2 : 6); i++) this.puff(s.tx, s.ty, 0.15, 'dust');
+        if (s.p !== 'stone') { for (let i = 0; i < 4; i++) this.puff(s.tx, s.ty, 0.1, 'debris'); this.addDecal({ k: 'scorch', x: s.tx, y: s.ty, r: s.p === 'shell' ? 0.35 : 0.25, life: 8, crater: true }); }
+      }
+    }
+    this.shots = this.shots.filter(s => t - s.t0 < s.d);
+    this.flashes = this.flashes.filter(f => t - f.t0 < f.d);
+    this.texts = this.texts.filter(f => t - f.t0 < f.d);
+    this.corpses = this.corpses.filter(c => t - c.t0 < 3);
+    this.decals = this.decals.filter(d => t - d.t0 < d.life);
   }
 
   // ---------------------------------------------------------- drawing
@@ -381,10 +444,14 @@ export class Renderer {
       const k = cx + ',' + cy;
       let c = this.chunks.get(k);
       if (!c) { if (built >= (F.fastBuild ? 999 : 3)) continue; c = this.chunk(cx, cy); built++; }
+      else { this.chunks.delete(k); this.chunks.set(k, c); } // LRU: refresh recency
       ctx.drawImage(c.cv, c.ox, c.oy);
       if (c.water && this.themeName !== 'space') this.drawWater(ctx, c, cx, cy);
     }
     this.pendingChunks = built;
+    // LRU eviction: keep at most ~400 chunks (more if the viewport itself needs more)
+    const cap = Math.max(400, (cx1 - cx0 + 1) * (cy1 - cy0 + 1) * 2);
+    if (this.chunks.size > cap) { const it = this.chunks.keys(); for (let n = this.chunks.size - cap; n > 0; n--) this.chunks.delete(it.next().value); }
     // grid in editor
     if (F.grid) {
       ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1 / z;
@@ -397,10 +464,15 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3 / z;
     ctx.beginPath(); ctx.moveTo(...iso(0, 0)); ctx.lineTo(...iso(this.w, 0)); ctx.lineTo(...iso(this.w, this.h)); ctx.lineTo(...iso(0, this.h)); ctx.closePath(); ctx.stroke();
 
+    // scorch marks, craters and rubble
+    if (this.decals.length) this.drawDecals(ctx);
     // ground decals: farms, selection rings, rally points, ghosts
+    this.lastEnts = F.ents;
     const drawables = [];
+    for (const c of this.corpses) if (c.x > minX && c.x < maxX && c.y > minY && c.y < maxY) drawables.push({ d: c.x + c.y - 0.4, corpse: c });
     if (!this.rocks) this.buildRocks();
-    for (const r of this.rocks) if (r.x > minX && r.x < maxX && r.y > minY && r.y < maxY) drawables.push({ d: r.x + r.y, rock: r });
+    // rocks are bucketed by row so big maps only scan the visible rows
+    for (let ry = Math.max(0, minY); ry <= Math.min(this.h - 1, maxY); ry++) { const row = this.rockRows[ry]; if (row) for (const r of row) if (r.x > minX && r.x < maxX) drawables.push({ d: r.x + r.y, rock: r }); }
     for (const e of F.ents) {
       if (e.x < minX - 3 || e.x > maxX + 3 || e.y < minY - 3 || e.y > maxY + 3) continue;
       let d = e.x + e.y;
@@ -452,18 +524,24 @@ export class Renderer {
       ctx.beginPath(); ctx.ellipse(sx, sy, 14 * (1 - k * 0.6), 7 * (1 - k * 0.6), 0, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
     }
 
-    // entities
+    // entities; level of detail drops when zoomed out or crowded
     const t = this.time;
+    let nUnits = 0;
+    for (const it of drawables) if (it.e && it.e.k === 0) nUnits++;
+    const lod = z < 0.85 || nUnits > 140;
     for (const it of drawables) {
       if (it.rock) {
         const [sx, sy] = iso(it.rock.x, it.rock.y);
         ctx.drawImage(this.rockSprite(it.rock.v), sx - 40, sy - 56, 80, 70);
         continue;
       }
+      if (it.corpse) { this.drawCorpse(ctx, it.corpse, t); continue; }
       const e = it.e;
       const [sx, sy] = iso(e.x, e.y);
       if (e.k === 2) {
-        const s = resourceSprite(e.t, this.themeName, e.v || 0);
+        const rd = this.defs && this.defs.resources ? this.defs.resources[e.t] : null;
+        const lvl = e.a != null && rd && rd.amount ? Math.max(1, Math.min(4, Math.ceil(e.a / rd.amount * 4))) : 4;
+        const s = resourceSprite(e.t, this.themeName, e.v || 0, e.t === 'tree' ? 4 : lvl);
         const k = e.t === 'tree' ? 1 : 0.9;
         if (e.t === 'fish') {
           // gentle drift and an expanding ripple
@@ -472,14 +550,23 @@ export class Renderer {
           const f = (t * 0.45 + (e.i || 0) * 0.29) % 1;
           ctx.strokeStyle = `rgba(235,250,255,${0.5 * (1 - f)})`; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.ellipse(sx + Math.sin(e.i || 0) * 8, sy - 2, 3 + f * 14, (3 + f * 14) * 0.45, 0, 0, 7); ctx.stroke();
+        } else if (e.t === 'tree' && z > 0.6) {
+          // gentle wind sway: skew around the trunk base
+          const sw = Math.sin(t * 1.1 + e.x * 0.7 + e.y * 0.4) * 0.035 + Math.sin(t * 2.7 + e.x * 1.9) * 0.012;
+          ctx.save(); ctx.transform(1, 0, sw, 1, -sw * sy, 0);
+          ctx.drawImage(s.canvas, sx - s.ox * k, sy - s.oy * k, s.w * k, s.h * k);
+          ctx.restore();
         } else ctx.drawImage(s.canvas, sx - s.ox * k, sy - s.oy * k, s.w * k, s.h * k);
       } else if (e.k === 1) {
         const s = e.def.size;
         const stage = e.prog > 0 && e.prog < 1 ? Math.min(2, Math.floor(e.prog * 3)) : 3;
         const [ax, ay] = iso(e.x - s / 2, e.y - s / 2);
         const era = this.defs ? this.defs.ages[e.g || 0].era : 'stone';
-        const sp = buildingSprite(e.t, era, e.o, s, stage, true);
+        const dmg = stage === 3 && e.t !== 'farm' ? (e.hp < 0.33 ? 2 : e.hp < 0.66 ? 1 : 0) : 0;
+        const sp0 = buildingSprite(e.t, era, e.o, s, stage, true);
+        const sp = dmg ? damageSprite(sp0, dmg, `${e.t}|${era}|${e.o}|${s}`) : sp0;
         ctx.drawImage(sp.canvas, ax - sp.ox, ay - sp.oy, sp.w, sp.h);
+        if (stage < 3 && e.prog > 0 && Math.random() < dt * 2.5) this.puff(e.x + (Math.random() - 0.5) * s * 0.8, e.y + (Math.random() - 0.5) * s * 0.8, 0.1, 'dust');
         if (stage === 3) {
           if (buildingAnimated(e.t, era)) { ctx.save(); ctx.translate(ax, ay); drawBuildingAnim(ctx, e.t, era, e.o, s, t); ctx.restore(); }
           for (const p of smokePoints(e.t, era, s)) {
@@ -488,13 +575,15 @@ export class Renderer {
           if (e.t === 'town_center' && era === 'stone' && Math.random() < 0.7) this.puff(e.x - s / 2 + 2.15, e.y - s / 2 + 2.15, 0.08, 'campfire');
         }
         if (e.hp < 0.5 && stage === 3 && e.t !== 'farm' && Math.random() < dt * 6) this.puff(e.x + (Math.random() - 0.5) * s * 0.6, e.y + (Math.random() - 0.5) * s * 0.6, 0.1, Math.random() < 0.5 ? 'fire' : 'smoke');
+        if (dmg === 2 && sp.fire) this.drawFlames(ctx, sp.fire, ax - sp.ox, ay - sp.oy, e.i, t);
       } else {
         const def = e.def;
         if (!def) continue;
         const walking = e.moving;
         const walk = walking ? (t * (def.speed || 1) * 1.6 + e.i * 0.37) % 1 : 0;
         const act = e.b ? (t * 1.6 + e.i * 0.21) % 1 : 0;
-        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t, moving: !!walking });
+        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t, moving: !!walking, res: e.r, state: e.s, lod });
+        if (walking && !def.flying && !def.naval && def.class !== 'naval' && (def.class === 'mounted' || def.class === 'siege' || def.pop > 1 || def.class === 'animal') && Math.random() < dt * 7 && this.themeName !== 'space') this.puff(e.x - Math.cos(e.f || 0) * 0.25, e.y - Math.sin(e.f || 0) * 0.25, 0.12, 'kick');
       }
     }
     // particles
@@ -504,10 +593,24 @@ export class Renderer {
       switch (p.kind) {
         case 'smoke': case 'chimney': ctx.fillStyle = `rgba(90,90,90,${0.35 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age * 1.5), 0, 7); ctx.fill(); break;
         case 'dust': ctx.fillStyle = `rgba(150,128,96,${0.4 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age), 0, 7); ctx.fill(); break;
-        case 'fire': case 'campfire': ctx.fillStyle = `rgba(255,${(180 - age * 140) | 0},40,${0.85 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 - age * 0.5), 0, 7); ctx.fill(); break;
+        case 'fire': case 'campfire': {
+          const r0 = p.size * (1 - age * 0.5);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = `rgba(255,110,30,${0.22 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, r0 * 1.7, 0, 7); ctx.fill();
+          ctx.fillStyle = `rgba(255,${(170 - age * 130) | 0},40,${0.7 * (1 - age)})`; ctx.beginPath(); ctx.arc(sx, py, r0, 0, 7); ctx.fill();
+          if (age < 0.5) { ctx.fillStyle = `rgba(255,240,180,${0.6 * (1 - age * 2)})`; ctx.beginPath(); ctx.arc(sx, py, r0 * 0.45, 0, 7); ctx.fill(); }
+          ctx.globalCompositeOperation = 'source-over';
+          break;
+        }
         case 'spark': ctx.fillStyle = `rgba(255,240,180,${1 - age})`; ctx.fillRect(sx, py, 2, 2); break;
-        case 'chip': ctx.fillStyle = '#c8a070'; ctx.fillRect(sx, py, 2, 1.5); break;
-        case 'gold': ctx.fillStyle = '#ffe070'; ctx.fillRect(sx, py, 2, 2); break;
+        case 'gunsmoke': { const a = 0.45 * (1 - age); ctx.fillStyle = `rgba(225,222,215,${a})`; ctx.beginPath(); ctx.arc(sx, py, p.size * (1 + age * 2.2), 0, 7); ctx.fill(); break; }
+        case 'kick': ctx.fillStyle = this.themeName === 'winter' ? `rgba(240,245,255,${0.5 * (1 - age)})` : `rgba(160,136,100,${0.35 * (1 - age)})`; ctx.beginPath(); ctx.ellipse(sx, py, p.size * (1 + age * 1.5), p.size * (0.6 + age), 0, 0, 7); ctx.fill(); break;
+        case 'chip': ctx.fillStyle = '#c8a070'; ctx.fillRect(sx, py, 2, 1.5); ctx.fillStyle = '#7a5030'; ctx.fillRect(sx + 0.5, py + 1, 1.5, 0.6); break;
+        case 'gold': ctx.fillStyle = age < 0.5 && ((p.t0 * 10) | 0) % 2 ? '#fff6c0' : '#ffd84a'; ctx.fillRect(sx, py, 2, 2); break;
+        case 'grit': ctx.fillStyle = '#a8a49c'; ctx.fillRect(sx, py, 1.8, 1.4); break;
+        case 'shard': ctx.fillStyle = `rgba(140,240,255,${1 - age * 0.5})`; ctx.fillRect(sx, py, 1.6, 2.2); break;
+        case 'leaf': { ctx.fillStyle = ((p.rot * 10) | 0) % 3 ? '#4a8a30' : '#c4223a'; ctx.save(); ctx.translate(sx, py); ctx.rotate(p.rot + age * 6); ctx.fillRect(-1.2, -0.6, 2.4, 1.2); ctx.restore(); break; }
+        case 'debris': { ctx.fillStyle = ((p.rot * 10) | 0) % 2 ? '#5a4a3a' : '#8a8478'; ctx.save(); ctx.translate(sx, py); ctx.rotate(p.rot + age * 12); ctx.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.66); ctx.restore(); break; }
       }
     }
     // projectiles
@@ -521,16 +624,29 @@ export class Renderer {
       const [qx, qy] = iso(s.x + (s.tx - s.x) * k2, s.y + (s.ty - s.y) * k2);
       const qyz = qy - (0.5 + Math.sin(k2 * Math.PI) * s.arc * dist * 0.12) * ZH;
       switch (s.p) {
-        case 'arrow': case 'bolt': ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(qx, qyz); ctx.lineTo(px, pyz); ctx.stroke(); break;
+        case 'arrow': case 'bolt': {
+          // ground shadow, then shaft with head and fletching along the flight direction
+          const [gx, gy] = iso(s.x + (s.tx - s.x) * k2, s.y + (s.ty - s.y) * k2);
+          ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(px, py); ctx.stroke();
+          const dx = px - qx, dy = pyz - qyz, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+          const L = s.p === 'bolt' ? 6 : 9, tx0 = px - ux * L, ty0 = pyz - uy * L;
+          ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(tx0, ty0); ctx.lineTo(px, pyz); ctx.stroke();
+          ctx.fillStyle = '#c8ccd0'; ctx.beginPath(); ctx.moveTo(px + ux * 2.2, pyz + uy * 2.2); ctx.lineTo(px - uy * 1.1, pyz + ux * 1.1); ctx.lineTo(px + uy * 1.1, pyz - ux * 1.1); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = s.p === 'bolt' ? '#6a5a4a' : '#e8e0d0'; ctx.beginPath(); ctx.moveTo(tx0 + ux * 2.5, ty0 + uy * 2.5); ctx.lineTo(tx0 - uy * 1.6 - ux * 0.5, ty0 + ux * 1.6 - uy * 0.5); ctx.lineTo(tx0, ty0); ctx.lineTo(tx0 + uy * 1.6 - ux * 0.5, ty0 - ux * 1.6 - uy * 0.5); ctx.closePath(); ctx.fill();
+          break;
+        }
         case 'stone': case 'boulder': case 'cannonball': case 'grenade':
+          { const [gx, gy] = iso(x, y); const r0 = s.p === 'boulder' ? 4 : 2.5; ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(gx, gy, r0 * 1.2, r0 * 0.6, 0, 0, 7); ctx.fill(); }
           ctx.fillStyle = s.p === 'cannonball' ? '#222' : '#777'; ctx.beginPath(); ctx.arc(px, pyz, s.p === 'boulder' ? 4 : 2.5, 0, 7); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(px - 0.8, pyz - 0.8, s.p === 'boulder' ? 1.4 : 0.9, 0, 7); ctx.fill();
           if (s.p !== 'stone' && Math.random() < 0.5) this.puff(x, y, 0, 'smoke'); break;
         case 'bullet': case 'shell': ctx.strokeStyle = 'rgba(255,230,150,0.95)'; ctx.lineWidth = s.p === 'shell' ? 2.5 : 1.2; ctx.beginPath(); ctx.moveTo(qx, qyz); ctx.lineTo(px, pyz); ctx.stroke(); break;
         case 'rocket': case 'missile': ctx.fillStyle = '#ddd'; ctx.beginPath(); ctx.arc(px, pyz, 2, 0, 7); ctx.fill(); this.puff(x, y, 0, Math.random() < 0.5 ? 'fire' : 'smoke'); break;
         case 'laser': case 'rail': case 'ion': {
           const [ax, ay] = iso(s.x, s.y), [bx, by] = iso(s.tx, s.ty);
           const col = s.p === 'ion' ? '170,140,255' : s.p === 'rail' ? '200,240,255' : '90,240,255';
-          ctx.strokeStyle = `rgba(${col},${1 - k})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(ax, ay - 14); ctx.lineTo(bx, by - 10); ctx.stroke();
+          ctx.strokeStyle = `rgba(${col},${0.25 * (1 - k)})`; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(ax, ay - 14); ctx.lineTo(bx, by - 10); ctx.stroke();
+          ctx.strokeStyle = `rgba(${col},${1 - k})`; ctx.lineWidth = 3; ctx.stroke();
           ctx.strokeStyle = `rgba(255,255,255,${1 - k})`; ctx.lineWidth = 1; ctx.stroke(); break;
         }
         case 'plasma': { const g = ctx.createRadialGradient(px, pyz, 0, px, pyz, 7); g.addColorStop(0, '#fff'); g.addColorStop(0.4, 'rgba(255,110,240,0.9)'); g.addColorStop(1, 'rgba(255,110,240,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, pyz, 7, 0, 7); ctx.fill(); break; }
@@ -543,6 +659,7 @@ export class Renderer {
       g.addColorStop(0, `rgba(255,255,230,${0.9 * (1 - k)})`); g.addColorStop(0.4, `rgba(${f.c},${0.6 * (1 - k)})`); g.addColorStop(1, `rgba(${f.c},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py - 10, f.r, 0, 7); ctx.fill();
     }
+    this.drawBirds(ctx, F);
     // placement ghost
     if (F.ghost) {
       const g = F.ghost;
@@ -654,6 +771,106 @@ export class Renderer {
     }
   }
 
+  // scorch marks / craters (flat) and building rubble, fading out
+  drawDecals(ctx) {
+    const t = this.time;
+    for (const d of this.decals) {
+      const age = t - d.t0, fade = Math.min(1, (d.life - age) / 3);
+      const [sx, sy] = iso(d.x, d.y);
+      if (d.k === 'scorch') {
+        const R = d.r * TW * 0.5;
+        ctx.globalAlpha = fade * 0.75;
+        const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, R);
+        g.addColorStop(0, 'rgba(20,14,8,0.85)'); g.addColorStop(0.6, 'rgba(40,30,20,0.45)'); g.addColorStop(1, 'rgba(40,30,20,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(sx, sy, R, R * 0.5, 0, 0, 7); ctx.fill();
+        if (d.crater) { ctx.strokeStyle = 'rgba(150,130,100,0.55)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(sx, sy, R * 0.55, R * 0.27, 0, 0.2, Math.PI - 0.2); ctx.stroke(); }
+        if (age < 2.5) { ctx.globalAlpha = (1 - age / 2.5) * 0.8; const g2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, R * 0.5); g2.addColorStop(0, 'rgba(255,140,40,0.9)'); g2.addColorStop(1, 'rgba(255,90,20,0)'); ctx.fillStyle = g2; ctx.beginPath(); ctx.ellipse(sx, sy, R * 0.5, R * 0.25, 0, 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1;
+      } else if (d.k === 'rubble') {
+        const sp = rubbleSprite(d.s, d.v, this.themeName);
+        ctx.globalAlpha = fade;
+        ctx.drawImage(sp.canvas, sx - sp.ox, sy - sp.oy, sp.w, sp.h);
+        ctx.globalAlpha = 1;
+        if (age < 6 && Math.random() < 0.15) this.puff(d.x + (Math.random() - 0.5) * d.s * 0.6, d.y + (Math.random() - 0.5) * d.s * 0.6, 0.1, age < 2 ? 'fire' : 'smoke');
+      }
+    }
+  }
+
+  // fallen unit: tips over, lies still, then fades
+  drawCorpse(ctx, c, t) {
+    const age = t - c.t0;
+    const fall = Math.min(1, age / 0.4), ease = 1 - (1 - fall) * (1 - fall);
+    const alpha = age < 1.8 ? 1 : Math.max(0, 1 - (age - 1.8) / 1.2);
+    const [sx, sy] = iso(c.x, c.y);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (c.foot) {
+      const big = c.def.class === 'mounted' || c.def.sprite === 'chariot';
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(sx + c.side * 6 * ease, sy, 5 + 7 * ease * (big ? 1.8 : 1), 2.6, 0, 0, 7); ctx.fill();
+      ctx.translate(sx, sy);
+      ctx.rotate(c.side * ease * (big ? 1.25 : 1.45));
+      ctx.scale(1, 1 - ease * 0.25);
+      drawUnit(ctx, 0, 0, { def: c.def, team: c.team, era: c.def.era, face: c.f, walk: 0, act: 0, busy: false, carry: -1, id: c.id, t: c.t0, moving: false, noShadow: true });
+    } else {
+      // wreck: sinks a little and darkens (dark overlay drawn as a soot cloud)
+      drawUnit(ctx, sx, sy + ease * 3, { def: c.def, team: c.team, era: c.def.era, face: c.f, walk: 0, act: 0, busy: false, carry: -1, id: c.id, t: c.t0, moving: false });
+      const g = ctx.createRadialGradient(sx, sy - 8, 0, sx, sy - 8, 20);
+      g.addColorStop(0, 'rgba(10,8,6,0.7)'); g.addColorStop(1, 'rgba(10,8,6,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy - 8, 20, 0, 7); ctx.fill();
+      if (age < 2 && Math.random() < 0.3) this.puff(c.x, c.y, 0.15, Math.random() < 0.4 ? 'fire' : 'smoke');
+    }
+    ctx.restore();
+  }
+
+  // licking flames on a badly damaged building
+  drawFlames(ctx, pts, ox, oy, id, t) {
+    for (let i = 0; i < pts.length; i++) {
+      const bx = ox + pts[i][0], by = oy + pts[i][1];
+      const fl = 0.75 + Math.sin(t * 13 + i * 2.1 + id) * 0.15 + Math.sin(t * 23 + i) * 0.1;
+      const h = 11 * fl, w = 4;
+      const g = ctx.createRadialGradient(bx, by - h * 0.3, 0, bx, by - h * 0.3, h * 1.2);
+      g.addColorStop(0, 'rgba(255,200,80,0.4)'); g.addColorStop(1, 'rgba(255,120,30,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bx, by - h * 0.3, h * 1.2, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,110,30,0.9)';
+      ctx.beginPath(); ctx.moveTo(bx - w, by); ctx.quadraticCurveTo(bx - w * 0.8, by - h * 0.6, bx + Math.sin(t * 9 + i) * 1.5, by - h); ctx.quadraticCurveTo(bx + w * 0.8, by - h * 0.5, bx + w, by); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,230,120,0.95)';
+      ctx.beginPath(); ctx.moveTo(bx - w * 0.5, by); ctx.quadraticCurveTo(bx - w * 0.4, by - h * 0.4, bx + Math.sin(t * 11 + i) * 0.8, by - h * 0.6); ctx.quadraticCurveTo(bx + w * 0.4, by - h * 0.3, bx + w * 0.5, by); ctx.closePath(); ctx.fill();
+      if (Math.random() < 0.04) { const [wx, wy] = this.toWorldIso(bx, by); const p = this.puff(wx, wy, 0, 'smoke'); if (p) p.z = 0.9; }
+    }
+  }
+
+  // an occasional flock of birds circling over the woods
+  drawBirds(ctx, F) {
+    const tm = this.themeName;
+    if (tm === 'space' || tm === 'moon' || tm === 'mars') return;
+    const t = this.time;
+    if (!this.birds || t - this.birds.t0 > this.birds.life) {
+      if (this.birdsNext === undefined) this.birdsNext = t + 3;
+      if (t < this.birdsNext) return;
+      this.birdsNext = t + 10 + Math.random() * 14;
+      const v = this.view, trees = [];
+      for (const e of F.ents) if (e.k === 2 && e.t === 'tree' && e.x > v.minX && e.x < v.maxX && e.y > v.minY && e.y < v.maxY) trees.push(e);
+      if (!trees.length) { this.birds = null; return; }
+      const c = trees[(Math.random() * trees.length) | 0];
+      this.birds = { x: c.x, y: c.y, t0: t, life: 14, n: 3 + ((Math.random() * 4) | 0), r: 1.4 + Math.random(), dir: Math.random() < 0.5 ? -1 : 1, seed: Math.random() * 10 };
+    }
+    const b = this.birds, age = t - b.t0;
+    const a = Math.min(1, age / 1.5, (b.life - age) / 1.5);
+    if (a <= 0) return;
+    const col = tm === 'winter' ? '30,30,36' : '24,20,18';
+    for (let i = 0; i < b.n; i++) {
+      const ph = b.dir * (age * 0.45 + i * 0.55) + b.seed;
+      const r = b.r * (0.8 + 0.25 * Math.sin(i * 2.3));
+      const wx = b.x + Math.cos(ph) * r + age * 0.08, wy = b.y + Math.sin(ph) * r - age * 0.05;
+      const [gx, gy] = iso(wx, wy);
+      const alt = (3.2 + Math.sin(age * 0.7 + i) * 0.3) * ZH;
+      ctx.fillStyle = `rgba(0,0,0,${0.12 * a})`; ctx.beginPath(); ctx.ellipse(gx + alt * 0.35, gy, 2.4, 1, 0, 0, 7); ctx.fill();
+      const bx = gx, by = gy - alt, flap = Math.sin(t * 9 + i * 1.7) * 2.6;
+      ctx.strokeStyle = `rgba(${col},${0.85 * a})`; ctx.lineWidth = 1.1; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(bx - 3.6, by - flap); ctx.quadraticCurveTo(bx - 1.4, by - 1.2 - flap * 0.3, bx, by); ctx.quadraticCurveTo(bx + 1.4, by - 1.2 - flap * 0.3, bx + 3.6, by - flap); ctx.stroke();
+    }
+  }
+
   drawStars(ctx) {
     if (!this.stars) {
       this.stars = [];
@@ -676,7 +893,7 @@ export class Renderer {
     const S = mcv.width;
     if (!this.w) return;
     if (!this.miniBase || this.miniBase.width !== S || this.miniDirty) {
-      this.miniDirty = false;
+      this.miniDirty = false; this.miniFogSrc = null;
       this.miniBase = document.createElement('canvas'); this.miniBase.width = S; this.miniBase.height = S;
       const c = this.miniBase.getContext('2d');
       const { w, h, tiles } = this;
@@ -714,6 +931,8 @@ export class Renderer {
     // fog: unexplored = cloudy black, explored but not visible = dimmed
     if (fog) {
       if (!this.miniFog || this.miniFog.width !== this.w || this.miniFog.height !== this.h) { this.miniFog = document.createElement('canvas'); this.miniFog.width = this.w; this.miniFog.height = this.h; }
+      if (this.miniFogSrc !== fog || this.miniFogS !== S) {
+      this.miniFogSrc = fog; this.miniFogS = S;
       const fc = this.miniFog.getContext('2d'); const img = fc.createImageData(this.w, this.h);
       for (let i = 0; i < fog.length; i++) img.data[i * 4 + 3] = fog[i] === 0 ? 255 : fog[i] === 1 ? 120 : 0;
       fc.putImageData(img, 0, 0);
@@ -724,6 +943,7 @@ export class Renderer {
       L.drawImage(this.miniFog, 0, 0); L.filter = 'none'; L.restore();
       L.globalCompositeOperation = 'source-in'; L.drawImage(this.miniCloud, 0, 0);
       L.globalCompositeOperation = 'source-over';
+      }
       mctx.drawImage(this.miniFogLayer, 0, 0);
     }
     // entities: team-coloured dots with a dark outline (client data is fog-filtered already)
