@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/rom/lords_of_the_lowlands/internal/config"
 	"github.com/rom/lords_of_the_lowlands/internal/game"
 	"github.com/rom/lords_of_the_lowlands/internal/store"
 )
@@ -28,14 +30,20 @@ type env struct {
 	st  *store.Store
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T) *env { return newEnvWith(t, nil) }
+
+func newEnvWith(t *testing.T, mod func(c *config.Config)) *env {
 	t.Helper()
 	st, err := store.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	set := config.Default()
+	if mod != nil {
+		mod(set)
+	}
 	static := fstest.MapFS{"index.html": {Data: []byte("<h1>hi</h1>")}, "js/main.js": {Data: []byte("console.log(1)")}}
-	s, err := New(Config{Static: static, Store: st, AllowedOrigins: []string{"game.example"}})
+	s, err := New(Config{Static: static, Store: st, AllowedOrigins: []string{"game.example"}, Settings: set})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,10 +56,13 @@ func newEnv(t *testing.T) *env {
 }
 
 type client struct {
-	e   *env
-	hc  *http.Client
-	ws  *websocket.Conn
-	ctx context.Context
+	e     *env
+	hc    *http.Client
+	ws    *websocket.Conn
+	ctx   context.Context
+	hello map[string]interface{}
+	key   []byte
+	seq   int64
 }
 
 func (e *env) client() *client {
@@ -112,6 +123,17 @@ func (c *client) dial() {
 	}
 	ws.SetReadLimit(1 << 24)
 	c.ws = ws
+	c.hello = nil
+	c.seq = 0
+	c.hello = c.expect("hello")
+	c.key, _ = base64.StdEncoding.DecodeString(c.hello["key"].(string))
+}
+
+// cmd sends a signed game command.
+func (c *client) cmd(v map[string]interface{}) {
+	b, _ := json.Marshal(v)
+	c.seq++
+	c.send(map[string]interface{}{"t": "cmd", "p": string(b), "n": c.seq, "mac": Mac(c.key, c.seq, string(b))})
 }
 
 func (c *client) send(v interface{}) {
@@ -124,6 +146,9 @@ func (c *client) send(v interface{}) {
 // expect reads messages until one of type typ arrives (or times out).
 func (c *client) expect(typ string) map[string]interface{} {
 	c.e.t.Helper()
+	if typ == "hello" && c.hello != nil {
+		return c.hello
+	}
 	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 	defer cancel()
 	for {
@@ -560,7 +585,7 @@ func TestLobbyChatAndMatch(t *testing.T) {
 	carol.send(map[string]interface{}{"t": "join", "room": id})
 	carol.expect("error")
 	// issue a command; invalid commands produce cmderr
-	alice.send(map[string]interface{}{"t": "cmd", "cmd": map[string]interface{}{"c": "train", "t": 99999, "w": "worker"}})
+	alice.cmd(map[string]interface{}{"c": "train", "t": 99999, "w": "worker"})
 	alice.expect("cmderr")
 	var tc float64
 	for _, x := range s["ents"].([]interface{}) {
@@ -569,7 +594,7 @@ func TestLobbyChatAndMatch(t *testing.T) {
 			tc = en["i"].(float64)
 		}
 	}
-	alice.send(map[string]interface{}{"t": "cmd", "cmd": map[string]interface{}{"c": "train", "t": tc, "w": "worker"}})
+	alice.cmd(map[string]interface{}{"c": "train", "t": tc, "w": "worker"})
 	time.Sleep(300 * time.Millisecond)
 	// Bob disconnects and reconnects: he is put back into the game
 	bob.ws.Close(websocket.StatusNormalClosure, "")
@@ -580,7 +605,7 @@ func TestLobbyChatAndMatch(t *testing.T) {
 	}
 	// Bob resigns by leaving; Alice resigns too -> AI team wins, game ends
 	bob.send(map[string]string{"t": "leave"})
-	alice.send(map[string]interface{}{"t": "cmd", "cmd": map[string]interface{}{"c": "resign"}})
+	alice.cmd(map[string]interface{}{"c": "resign"})
 	end := alice.expect("end")
 	if end["results"] == nil {
 		t.Fatal("end")

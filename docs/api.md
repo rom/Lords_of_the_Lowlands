@@ -7,15 +7,20 @@ client. Routes are registered in `Server.routes()`
 
 ## Conventions
 
+Values in *italics* are defaults from the YAML configuration
+([operations.md](operations.md#configuration-file)).
+
 | Topic | Rule |
 |---|---|
 | Format | JSON (`application/json; charset=utf-8`), `Cache-Control: no-store` on API responses |
 | Errors | `{"error": "<message>"}` with a 4xx/5xx status |
-| Authentication | session cookie `lotl_session` (32 random bytes, base64url, 43 chars), `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age=604800` (7 days), `Secure` when TLS or `-secure-cookies` |
-| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most **1 MiB** (`http.MaxBytesReader`; **512 KiB** for `POST /api/levels`); exactly one JSON value; **unknown fields are rejected** (`DisallowUnknownFields`) → **400** `invalid JSON body` |
-| CSRF | non-GET `/api/*` requests must carry an `Origin` (or `Referer`) whose host equals the request `Host` or one of `-allow-origin`; requests without either header are accepted only if `Sec-Fetch-Site` is absent or `same-origin` → else **403** `cross-origin request refused` |
-| Rate limits | all `/api/*`: 20 requests/s per client IP, burst 60 → **429** `rate limit exceeded`; `register`/`login` additionally 1 per 5 s, burst 8 → **429** `too many attempts, try later` |
-| Client IP | `RemoteAddr`; the last `X-Forwarded-For` entry only with `-trust-proxy` |
+| Authentication | session cookie `lotl_session` (32 random bytes, base64url, 43 chars), `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` = `security.sessionTTL` (*168h*), `Secure` when TLS or `secureCookies` |
+| Session re-validation | on **every** request the account behind a registered session is re-read: deleted, `blocked` or `pending` accounts lose the session immediately, and the admin flag follows the current role |
+| Restricted session | an account that must use MFA but has not enrolled gets a session with `mfaSetup: true`; it is accepted only by `/api/me`, `/api/mfa/setup`, `/api/mfa/enable` and `/api/logout` (everything else answers as if not logged in) |
+| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most `security.maxBodyBytes` (*1 MiB*; **512 KiB** for `POST /api/levels`); exactly one JSON value; **unknown fields are rejected** → **400** `invalid JSON body` |
+| CSRF | non-GET `/api/*` requests must carry an `Origin` (or `Referer`) whose host equals the request `Host` or one of `allowedOrigins`; requests without either header are accepted only if `Sec-Fetch-Site` is absent or `same-origin` → else **403** `cross-origin request refused` |
+| Rate limits | all `/api/*`: `apiRate`/`apiBurst` (*20/s, burst 60*) per client IP → **429** `rate limit exceeded`; `register`/`login` additionally `authRate`/`authBurst` (*0.2/s, burst 8*) → **429** `too many attempts, try later` |
+| Client IP | `RemoteAddr`; the last `X-Forwarded-For` entry only with `trustProxy` |
 | Security headers | every response: CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, COOP/CORP `same-origin`, `Permissions-Policy`; HSTS with secure cookies |
 
 ## REST endpoints
@@ -23,11 +28,29 @@ client. Routes are registered in `Server.routes()`
 | Method | Path | Auth | Success | Errors |
 |---|---|---|---|---|
 | GET | `/healthz` | — | 200 `ok` (text) | |
-| POST | `/api/register` | — | 201 | 400, 409, 415, 429 |
-| POST | `/api/login` | — | 200 | 400, 401, 415, 429 |
-| POST | `/api/guest` | — | 200 | 400, 409, 415 |
+| GET | `/readyz` | — | 200 `ready` (text) | 503 |
+| GET | `/api/health` | — | 200 | |
+| GET | `/api/stats` | diagnostics¹ | 200 | 403 |
+| GET | `/metrics` | diagnostics¹ | 200 (Prometheus text) | 403 |
+| GET | `/api/config` | — | 200 | |
+| POST | `/api/register` | — | 201, 202 (approval) | 400, 403, 409, 415, 429 |
+| POST | `/api/login` | — | 200 | 400, 401, 403, 415, 429 |
+| POST | `/api/guest` | — | 200 | 400, 403, 409, 415 |
 | POST | `/api/logout` | cookie (optional) | 200 | |
-| GET | `/api/me` | cookie | 200 | 401 |
+| GET | `/api/me` | cookie (incl. restricted) | 200 | 401 |
+| POST | `/api/mfa/setup` | registered (incl. restricted) | 200 | 401 |
+| POST | `/api/mfa/enable` | registered (incl. restricted) | 200 | 400, 500 |
+| POST | `/api/mfa/disable` | registered | 200 | 400, 401, 403 |
+| GET | `/api/saves` | registered | 200 | 401 |
+| DELETE | `/api/saves/{id}` | registered, owner | 200 | 401, 404 |
+| GET | `/api/admin/users` | admin | 200 | 401, 403 |
+| POST | `/api/admin/users` | admin | 201 | 400, 401, 403, 409 |
+| PATCH | `/api/admin/users/{name}` | admin | 200 | 400, 401, 403, 404, 409 |
+| POST | `/api/admin/users/{name}/password` | admin | 200 | 400, 401, 403, 404 |
+| DELETE | `/api/admin/users/{name}` | admin | 200 | 401, 403, 404, 409 |
+| POST | `/api/admin/kick/{name}` | admin | 200 | 401, 403, 404 |
+| GET | `/api/admin/rooms` | admin | 200 | 401, 403 |
+| GET | `/api/admin/audit` | admin | 200 | 401, 403 |
 | GET | `/api/defs` | — | 200 | |
 | GET | `/api/levels` | — | 200 | |
 | GET | `/api/levels/{id}` | — | 200 | 404 |
@@ -38,13 +61,27 @@ client. Routes are registered in `Server.routes()`
 | GET | `/api/leaderboard` | — | 200 | |
 | GET | `/api/online` | — | 200 | |
 | GET | `/api/players/{name}` | — | 200 | 404 |
-| GET | `/ws` | cookie | 101 | 401 |
-| GET | `/`, `/editor.html`, `/js/*`, `/css/*` | — | 200 (embedded files, `Cache-Control: no-cache`) | 404 |
+| GET | `/ws` | cookie (not restricted) | 101 | 401 |
+| GET | `/`, `/editor.html`, `/admin.html`, `/js/*`, `/css/*` | — | 200 (embedded files, `Cache-Control: no-cache`) | 404 |
 
 Every `/api/*` response may also be **429** (global limiter); every non-GET
 may be **403** (CSRF) or **415** (content type).
 
+¹ *diagnostics* = see [Diagnostics](#diagnostics). *admin* = active account
+with role `admin` and no pending MFA enrolment (**401** `log in as an
+administrator` without a full session, **403** `administrators only` for
+other accounts).
+
 ### Accounts and sessions
+
+#### `GET /api/config`
+
+Public settings the client needs before login:
+
+```json
+{"registration":"open","allowGuests":true,"minPasswordLength":8,
+ "demo":{"enabled":true,"idleMinutes":3,"rotateMinutes":6},"signedCommands":true}
+```
 
 #### `POST /api/register`
 
@@ -63,25 +100,54 @@ Set-Cookie: lotl_session=CPmlDUxTrr…; Path=/; Max-Age=604800; HttpOnly; SameSi
 {"guest":false,"name":"Alice"}
 ```
 
+With `accounts.registration: approval` the account is created with status
+`pending`, **no** cookie is set and the answer is
+
+```http
+HTTP/1.1 202 Accepted
+
+{"name":"Alice","pending":true,"message":"Your account awaits approval by an administrator."}
+```
+
 | Status | Body | Cause |
 |---|---|---|
 | 400 | `name must be 3-20 letters, digits, _ or -` | name not `^[A-Za-z0-9_-]{3,20}$` |
-| 400 | `password must be 8-128 characters` | |
+| 400 | `password must be 8-128 characters` | shorter than `accounts.minPasswordLength` (*8*) or longer than 128 (the message is fixed) |
+| 403 | `registration is closed on this server; ask an administrator for an account` | `registration: closed` |
 | 409 | `name already taken` | registered, or currently used by a logged-in guest (case-insensitive) |
 | 429 | `too many attempts, try later` | auth limiter |
 
+Every registration is written to the audit log (`register`).
+
 #### `POST /api/login`
 
-Body `{"name","password"}`. **200** `{"guest":false,"name":"Alice"}` + cookie;
-**401** `invalid name or password` (same message and comparable timing for
-unknown users — a dummy argon2id hash is computed). Names are
-case-insensitive; the stored spelling is returned.
+Body `{"name","password","code"?}`. `code` is the 6-digit authenticator code
+for accounts with MFA.
+
+```json
+{"name":"Alice","guest":false,"admin":false,"mfaSetup":false}
+```
+
+| Status | Body | Cause |
+|---|---|---|
+| 200 | as above + cookie | success; `mfaSetup: true` = restricted session, enrol MFA first |
+| 401 | `{"error":"invalid name or password"}` | same message and comparable timing for unknown users (dummy argon2id hash) |
+| 401 | `{"error":"authenticator code required","mfa":true}` | password correct, MFA enabled, no `code` |
+| 401 | `{"error":"invalid authenticator code","mfa":true}` | wrong, expired or already used code (audit `mfa-fail`) |
+| 403 | `your account awaits approval by an administrator` | status `pending` |
+| 403 | `this account has been blocked` | status `blocked` (audit `login-blocked`) |
+| 429 | `too many attempts, try later` | auth limiter |
+
+Names are case-insensitive; the stored spelling is returned. A successful
+login stores `lastLogin`.
 
 #### `POST /api/guest`
 
 Body `{"name":"Bob_1"}`. **200** `{"guest":true,"name":"Bob_1"}` + cookie.
-**400** bad name, **409** `name is registered or in use`. Guests can play
-everything but cannot save levels and are not recorded in scores.
+**400** bad name, **403** `guest play is disabled on this server`
+(`allowGuests: false`), **409** `name is registered or in use`. Guests can
+play everything but cannot save levels or games and are not recorded in
+scores.
 
 #### `POST /api/logout`
 
@@ -91,11 +157,164 @@ Deletes the server-side session and expires the cookie. Always **200**
 #### `GET /api/me`
 
 ```json
-{"name":"Alice","guest":false,
+{"name":"Alice","guest":false,"admin":false,"mfaSetup":false,"mfaEnabled":true,"mfaRequired":false,
  "stats":{"name":"Alice","games":3,"wins":2,"losses":1,"bestScore":5120,"campaign":2}}
 ```
 
-`stats` is present only for registered users. **401** `not logged in`.
+`stats`, `mfaEnabled` and `mfaRequired` are present only for registered
+users. Also answers for restricted sessions. **401** `not logged in`.
+
+### Two-factor authentication (TOTP)
+
+RFC 6238: HMAC-SHA1, 6 digits, 30 s step, ±1 step tolerance, each step
+usable once (`MFALastStep`). Enrolment:
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    B->>S: POST /api/mfa/setup {}
+    S-->>B: {"secret":"JBSW…","uri":"otpauth://totp/…"}  (secret kept in the session)
+    Note over B: user scans the URI / types the secret into an authenticator app
+    B->>S: POST /api/mfa/enable {"code":"123456"}
+    S-->>B: {"ok":true}  (secret stored, restricted session upgraded, audit mfa-enable)
+```
+
+| Endpoint | Body | Success | Errors |
+|---|---|---|---|
+| `POST /api/mfa/setup` | `{}` | `{"secret","uri"}` — `uri` = `otpauth://totp/<issuer>:<name>?secret=…&issuer=…&algorithm=SHA1&digits=6&period=30` (issuer `accounts.mfaIssuer`) | **401** `log in with an account first` (none or guest) |
+| `POST /api/mfa/enable` | `{"code"}` | `{"ok":true}` | **400** `start MFA setup first`, **400** `invalid code — check your authenticator's clock`, **500** `could not save` |
+| `POST /api/mfa/disable` | `{"code"}` | `{"ok":true}` (audit `mfa-disable`) | **401** `not logged in`, **400** `MFA is not enabled`, **403** `MFA is required for this account`, **400** `invalid code` |
+
+MFA is *required* when the account has `mfaRequired` (set by an admin) or is
+an admin while `accounts.requireAdminMFA` is on. Such accounts without an
+authenticator receive a restricted session at login.
+
+### Saved games
+
+Saving and resuming happen over the WebSocket (`save`, `restore`); REST only
+lists and deletes. Registered users only (**401** `log in with an account to
+use saved games` / `not logged in`).
+
+| Endpoint | Response |
+|---|---|
+| `GET /api/saves` | newest first: `[{"id":"s-1f3a…","name":"Before the siege","level":"Shield Wall","age":7,"minutes":23.4,"players":["Alice","Boudica [AI]"],"created":"2026-11-14T13:00:00Z","size":183412}]` |
+| `DELETE /api/saves/{id}` | **200** `{"ok":true}`; **404** `no such save` (also for malformed ids — ids are `s-` + 16 hex) |
+
+### Administration
+
+All endpoints need an admin session; the page `/admin.html` uses them.
+Every change is written to the audit log.
+
+#### `GET /api/admin/users`
+
+```json
+{"registration":"approval","users":[
+  {"name":"Alice","games":3,"wins":2,"losses":1,"bestScore":5120,"campaign":2,
+   "role":"user","status":"pending","created":"…","lastLogin":"0001-01-01T00:00:00Z",
+   "mfaEnabled":false,"mfaRequired":false,"flags":null,"note":"","online":false}]}
+```
+
+`flags` lists anti-cheat findings `{"time","reason","score","game"}` (last 50).
+Secrets (hash, salt, MFA secret) are never returned.
+
+#### `POST /api/admin/users`
+
+```json
+{"name":"Carol","password":"long enough pw","role":"user","mfaRequired":true,"note":"tournament"}
+```
+
+Creates an **active** account (`role` default `user`; `note` cut to 300
+characters, control characters removed). **201** `{"name":"Carol"}`,
+**400** bad name/password/role (`invalid value`), **409** `name already taken`.
+Works in every registration mode.
+
+#### `PATCH /api/admin/users/{name}`
+
+All fields optional; omitted fields are unchanged:
+
+```json
+{"role":"admin","status":"active","mfaRequired":true,"resetMfa":false,"clearFlags":true,"note":"approved"}
+```
+
+| Field | Values / effect |
+|---|---|
+| `role` | `user` \| `admin` |
+| `status` | `active` \| `pending` \| `blocked` |
+| `mfaRequired` | force MFA enrolment at next login |
+| `resetMfa` | remove the authenticator (secret, enabled flag, last step) |
+| `clearFlags` | delete anti-cheat flags |
+| `note` | free text for administrators |
+
+Setting a non-active status, `resetMfa` or `mfaRequired: true` ends all
+sessions of that user and disconnects their WebSocket. **200** `{"ok":true}`;
+**400** `invalid value`; **404** `no such user`; **409** `cannot demote or
+block the last administrator`.
+
+#### Other admin endpoints
+
+| Endpoint | Body | Success | Errors |
+|---|---|---|---|
+| `POST /api/admin/users/{name}/password` | `{"password"}` | `{"ok":true}`; sessions ended, player kicked, audit `password-reset` | **400** bad password, **404** `no such user` |
+| `DELETE /api/admin/users/{name}` | — | `{"ok":true}`; account and its saves removed (scores and levels stay), sessions ended, player kicked | **409** `you cannot delete your own account`, **409** `cannot delete the last administrator`, **404** `no such user` |
+| `POST /api/admin/kick/{name}` | — | `{"ok":true}`; WebSocket closed with an error message (the session stays) | **404** `player is not online` |
+| `GET /api/admin/rooms` | — | every room incl. demo rooms, as `roomSummary` (see `lobby`), sorted by id | |
+| `GET /api/admin/audit` | — | newest 300 audit entries, newest first: `[{"time":"…","actor":"admin","action":"user-update","target":"Alice","detail":"status=active"}]` | |
+
+Audit actions: `register`, `login-blocked`, `mfa-fail`, `mfa-enable`,
+`mfa-disable`, `bootstrap-admin`, `user-create`, `user-update`,
+`password-reset`, `user-delete`, `kick` (actor = admin, or `anticheat` with
+the score and events in `detail`).
+
+### Diagnostics
+
+| Endpoint | Access | Response |
+|---|---|---|
+| `GET /healthz` | public, not rate limited | `ok` |
+| `GET /readyz` | public, not rate limited | `ready` if a temp file can be created in the data directory, else **503** `data directory not writable` |
+| `GET /api/health` | public | `{"status":"ok","version":"dev","uptimeSeconds":3600,"time":"…"}` |
+| `GET /api/stats` | diagnostics | statistics JSON (below); **403** `statistics require the metrics token or an administrator` |
+| `GET /metrics` | diagnostics | Prometheus text format 0.0.4; **403** `forbidden` |
+
+*Diagnostics* access (`diagAllowed`):
+
+| `metrics.token` | `metrics.public` | Allowed |
+|---|---|---|
+| set | (ignored) | `Authorization: Bearer <token>` or an admin session |
+| empty | `true` | everyone |
+| empty | `false` (*default*) | admin session or a loopback client address |
+
+`version` is `internal/server.Version` (`dev` unless set with
+`-ldflags "-X github.com/rom/lords_of_the_lowlands/internal/server.Version=…"`).
+
+`GET /api/stats`:
+
+```json
+{"version":"dev","uptimeSeconds":3600,"users":42,"online":7,"sessions":9,
+ "rooms":{"lobby":1,"playing":3,"demo":1},"playersInGames":5,
+ "counters":{"http_requests":1200,"http_errors":0,"ws_messages_in":50211,"ws_messages_out":90122,
+   "ws_bytes_out":81234567,"ws_dropped":12,"snapshots":88000,"commands":4100,"commands_rejected":37,
+   "logins_ok":20,"logins_failed":3,"games_started":6,"games_ended":3,"cheat_flags":0,"cheat_kicks":0,
+   "games_saved":2,"games_restored":1},
+ "tickSeconds":{"count":36000,"p50":0.0004,"p95":0.0011,"p99":0.002,"max":0.009},
+ "httpSeconds":{"count":1200,"p50":0.0002,"p95":0.003,"max":0.08},
+ "runtime":{"goroutines":31,"heap_alloc_bytes":12345678,"heap_sys_bytes":23456789,"gc_cycles":40,"gc_pause_total_ns":1234567}}
+```
+
+Percentiles come from the last 1 024 samples; `tickSeconds` measures
+simulation step + snapshot fan-out per room tick. `/ws` requests are not
+counted in the HTTP numbers.
+
+`GET /metrics` metric families:
+
+| Metric | Type | Labels / notes |
+|---|---|---|
+| `lotl_uptime_seconds`, `lotl_users`, `lotl_online`, `lotl_sessions`, `lotl_players_in_games` | gauge | |
+| `lotl_rooms` | gauge | `state` = `lobby`, `playing`, `done`, `demo` |
+| `lotl_<counter>_total` | counter | one per `counters` key above, e.g. `lotl_http_requests_total`, `lotl_cheat_kicks_total`, `lotl_games_saved_total` |
+| `lotl_tick_duration_seconds` | histogram | buckets 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1, +Inf |
+| `lotl_http_request_duration_seconds` | histogram | same buckets |
+| `lotl_go_goroutines`, `lotl_go_heap_alloc_bytes`, `lotl_go_heap_sys_bytes`, `lotl_go_gc_cycles` | gauge | |
 
 ### Game data
 
@@ -130,7 +349,7 @@ Resource arrays are always `[food, wood, stone, gold, energy]`.
   "campaign": [
     {"id":"campaign-01","name":"The First Fire","description":"…","author":"Campaign","theme":"temperate",
      "width":56,"height":56,"startAge":0,"maxAge":1,"maxPlayers":4,
-     "objective":{"type":"conquest"},"campaign":1,"opponents":1,"difficulty":"easy"}, …
+     "objective":{"type":"conquest"},"campaign":1,"opponents":1,"difficulty":"easy","mapType":"inland"}, …
   ],
   "custom": [
     {"id":"u-3f9c2a…","name":"Polder Wars","author":"Alice","description":"…","width":64,"height":64,
@@ -168,12 +387,14 @@ Owner only. **200** `{"ok":true}`, **401**, **403** `forbidden`, **404** `not fo
 Returns a random map as a full `Level` (`id` empty, `name` `"New Level"`).
 
 ```json
-{"theme":"desert","size":72,"startAge":0,"maxAge":3,"seed":12345,"water":0.3,"players":4}
+{"theme":"desert","size":72,"startAge":0,"maxAge":3,"seed":12345,"water":0.3,"players":4,"mapType":"riverland"}
 ```
 
 All fields optional: `size` 0 → 72 (else 24..128), `players` outside 2..8 → 2,
 `water` outside 0..1 → 0.3, `maxAge < startAge` → `startAge`. **400** on
-validation errors (e.g. size out of range, unknown theme).
+validation errors (e.g. size out of range, unknown theme, `unknown map type "…"`).
+`mapType` is one of `inland` (default), `coastal`, `riverland`, `lakes`,
+`desert`, `highland`.
 
 ### Hall of fame
 
@@ -200,6 +421,31 @@ Password salts and hashes are never serialised (`User.Public()`).
   receives `error: logged in from another window`).
 - Invalid messages are answered with `{"t":"error","msg":…}` and otherwise
   ignored; the connection stays open.
+- Restricted (MFA-setup) sessions are refused (**401**).
+
+### Connection handshake and anti-cheat
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant H as Hub
+    H-->>B: {"t":"hello","name","guest","key":"base64 of 32 bytes","signed":true,"demo":{…}}
+    B->>H: {"t":"integrity","h":{"/js/main.js":"sha256 hex",…},"wd":false}
+    B->>H: {"t":"cmd","p":"{\"c\":\"move\",…}","n":1,"mac":"hmac hex"}
+    B->>H: {"t":"cmd","p":"…","n":2,"mac":"hmac hex"}
+```
+
+With `signed: true` (anti-cheat `enabled` and `signedCommands`) every `cmd`
+must be signed: `p` is the JSON text of the command, `n` starts at 1 and
+increases by exactly 1, `mac` = hex(HMAC-SHA256(key, `"<n>:<p>"`)), 64 hex
+characters. Unsigned, badly signed or out-of-sequence commands are dropped
+and scored (see [security.md §3.5](security.md#35-anti-cheat)). With
+`signed: false` the plain form `{"t":"cmd","cmd":{…}}` is used. The key and
+counter are per connection; a reconnect starts over.
+
+The client sends one `integrity` report after `hello`: SHA-256 hex of each
+of its modules (`h`, ≤ 64 entries, keys ≤ 64 chars, values 64 chars) and
+`wd` = `navigator.webdriver`.
 
 ### Client → server
 
@@ -212,15 +458,21 @@ all are validated by `ParseClientMsg`.
 | `chat` | `ch` (`global`\|`room`\|`team`\|`whisper`), `text`, `to` (whisper) | chat | text cleaned and cut to 300 runes, must be non-empty; `to` ≤ 32 bytes; 1 msg/s, burst 5 |
 | `create` | `name`, `level` or `skirmish`, `diff` | create a lobby room (you are host) | name cleaned to 48 runes (default `Battle`); `level` ≤ 64 bytes; skirmish rooms have 4 seats |
 | `quick` | `level` or `skirmish`, `opp`, `diff` | create and immediately start a game vs AI | `opp` 0..7 (0 = level default); skirmish players = `opp + 1` |
-| `join` | `room` | take the first open seat | `room` ≤ 32 bytes; lobby state only |
-| `leave` | — | leave the room; resigns if the game is running | |
+| `join` | `room` | take the first open seat (also reserved seats of a restored game) | `room` ≤ 32 bytes; lobby state only (demo rooms cannot be joined) |
+| `leave` | — | leave the room; resigns if the game is running; ends a demo | |
 | `slot` | `slot`, `kind` (`open`\|`closed`\|`ai`), `team`, `diff` | host edits a seat | `slot` 0..7, `team` 0..8 |
 | `team` | `team` | change your own team | 0..8 |
-| `start` | — | host starts the match | ≥ 2 players on ≥ 2 teams |
-| `cmd` | `cmd` (see below) | game command | 25 cmds/s, burst 60 (excess silently dropped); ≤ 120 ids; `w` ≤ 40 chars without `<>"'\` |
+| `start` | — | host starts the match | ≥ 2 players on ≥ 2 teams (not checked for restored games) |
+| `cmd` | `p`, `n`, `mac` (signed) or `cmd` (unsigned) | game command | 25 cmds/s, burst 60 (excess silently dropped); ≤ 120 ids; `w` ≤ 40 chars without `<>"'\` |
+| `integrity` | `h`, `wd` | client integrity report | ≤ 64 hashes |
+| `save` | `name` | save the running game of your room | registered; name cleaned to 48 runes (default `Saved game`); 1 per 10 s, burst 2; `game.maxSavesPerUser` (*20*) |
+| `restore` | `save` | open a lobby room from a saved game | registered; `save` = 18-char id |
+| `demo` | — | start watching a demo match | demo enabled; not in a room; `game.demo.maxRooms` (*10*) |
 
-`diff` is `""`, `easy`, `normal` or `hard`. `skirmish` is
-`{"theme","size","startAge","maxAge","seed","water"}` (size 0..128, ages 0..16).
+`diff` is `""` (normal), `super_easy`, `easy`, `normal`, `hard`,
+`super_hard` or `insane`. `skirmish` is
+`{"theme","size","startAge","maxAge","seed","water","mapType"}` (size 0..128,
+ages 0..16, map type as for `/api/generate`).
 
 Examples:
 
@@ -230,9 +482,37 @@ Examples:
 {"t":"quick","level":"campaign-04","diff":"hard"}
 {"t":"quick","opp":3,"diff":"normal","skirmish":{"theme":"winter","size":96,"startAge":4,"maxAge":9,"seed":42,"water":0.25}}
 {"t":"create","name":"Friday night","level":"u-3f9c2a0d11aa47e0"}
-{"t":"slot","slot":2,"kind":"ai","team":2,"diff":"hard"}
+{"t":"slot","slot":2,"kind":"ai","team":2,"diff":"super_hard"}
 {"t":"start"}
+{"t":"save","name":"Before the siege"}
+{"t":"restore","save":"s-1f3a9c0d22b14e77"}
+{"t":"demo"}
 ```
+
+#### Save and restore
+
+| Step | Message | Notes |
+|---|---|---|
+| save | `{"t":"save","name"}` → `{"t":"saved","id","name"}` | the whole match (all players) is stored in `data/saves/<you>/`; the game keeps running |
+| restore | `{"t":"restore","save":id}` → `{"t":"room",…}` | new lobby room named `<save name> (restored)` with one seat per saved player: yours is taken (the seat with your name, else the last one), AI seats stay AI, other human seats are `open` with `reserved: true` and the original name |
+| start | `{"t":"start"}` (host) | the saved state continues; seats without a connected human are played by the computer (`normal` unless set) |
+
+Errors (`error` message): `register an account to save games`, `please wait
+before saving again`, `you are not in a game`, `the game is not running`,
+`save slots full — delete an old save first`, `could not save`,
+`register an account to use saved games`, `saved game not found`,
+`saved game is damaged: <reason>`.
+
+#### Demo mode
+
+The client sends `{"t":"demo"}` after `game.demo.idleMinutes` without input
+on a menu screen. The server creates a hidden room (`d<n>`) with 2–4 AI
+players and answers with `start` (`you: -1`, `demo: true`,
+`rotateMinutes`); snapshots are unfogged (`you: -1`). Every
+`rotateMinutes`, or when the match ends, a new `start` follows in the same
+room. `{"t":"leave"}` ends it. Errors: `demo mode is disabled on this
+server`, `leave your current room first`, `no demo available right now`,
+`could not start the demo`.
 
 #### Game commands (`cmd`)
 
@@ -249,20 +529,24 @@ message; it is the seat of the connection.
 | `attack` | `ids, t` | attack target | visible target |
 | `gather` | `ids, t` | gather/hunt | visible target, workers |
 | `repair` | `ids, t` | build/repair own building | |
-| `build` | `ids, x, y, w` | place building `w` with its top-left tile at `x,y` | workers among `ids`; age requirement; explored, free, non-ford footprint; cost |
-| `train` | `t, w, i` | queue unit of class or id `w` at building `t`; `i` 2..5 = repeat | own built building; trains that class; age; cost; queue ≤ 10 |
-| `research` | `t, w` | tech id or `"age"` | academy for techs / town centre for `age`; age; not yet researched or queued; cost |
+| `build` | `ids, x, y, w` | place building `w` with its top-left tile at `x,y` | workers among `ids`; age requirement; explored, free, non-ford footprint; cost; a `dock` only on naval maps with ≥ 2 water tiles along its edge |
+| `train` | `t, w, i` | queue unit of class or id `w` at building `t`; `i` 2..5 = repeat | own built building; trains that class (dock: `fisher`, `naval`); age; cost; queue ≤ 10 |
+| `research` | `t, w` | tech id or `"age"` | academy for techs / town centre for `age`; age; allowed on this map type; not yet researched or queued; cost |
 | `cancel` | `t, i` | cancel queue item `i` (full refund) or an unfinished building (75 % refund) | own building |
 | `rally` | `t, x, y` | set rally point | own building |
 | `stop` | `ids` | idle | |
 | `delete` | `ids` | destroy own units/buildings | |
 | `resign` | — | concede | |
 
+Unsigned form (when `hello.signed` is false); with signing the same object
+is sent as the string `p`:
+
 ```json
 {"t":"cmd","cmd":{"c":"build","ids":[17,18],"x":31,"y":22,"w":"house"}}
 {"t":"cmd","cmd":{"c":"train","t":5,"w":"infantry","i":5}}
 {"t":"cmd","cmd":{"c":"research","t":5,"w":"age"}}
 {"t":"cmd","cmd":{"c":"smart","ids":[17],"t":262,"x":8.5,"y":28.5}}
+{"t":"cmd","p":"{\"c\":\"stop\",\"ids\":[17]}","n":7,"mac":"9f2c…(64 hex)"}
 ```
 
 Rejected commands produce `{"t":"cmderr","msg":…}` with one of
@@ -273,15 +557,17 @@ Rejected commands produce `{"t":"cmderr","msg":…}` with one of
 
 | `t` | Delivery | Payload |
 |---|---|---|
-| `hello` | reliable | `{"name","guest"}` — first message after connect |
+| `hello` | reliable | `{"name","guest","key","signed","demo":{"enabled","idleMinutes","rotateMinutes"}}` — first message after connect |
 | `chat` | reliable | `{"ch","from","to"?,"text","ts"}` (Unix seconds); last 50 global messages are replayed after `hello` |
-| `lobby` | lossy | `{"rooms":[roomSummary],"online":[names]}` — on every lobby change |
-| `room` | reliable | room view: `{"id","name","host","state","level":{levelInfo},"slots":[{"kind","name","team","diff"}]}` |
-| `start` | reliable | `{"map":MapView,"you","players","cam":[x,y],"level":{levelInfo},"room"}` |
+| `lobby` | lossy | `{"rooms":[roomSummary],"online":[names]}` — on every lobby change; demo rooms are not listed |
+| `room` | reliable | room view: `{"id","name","host","state","level":{levelInfo},"slots":[{"kind","name","team","diff","reserved"?}]}` |
+| `start` | reliable | `{"map":MapView,"you","players","cam":[x,y],"level":{levelInfo},"room"}`; demo: `you: -1`, `demo: true`, `rotateMinutes` |
 | `snap` | lossy, 10 Hz | `{"s": Snapshot}` |
 | `cmderr` | lossy | `{"msg"}` |
 | `end` | reliable | `{"results":[Result],"winner":team}` |
-| `error` | reliable | `{"msg"}` |
+| `saved` | reliable | `{"id","name"}` |
+| `warn` | reliable | `{"msg"}` — anti-cheat warning |
+| `error` | reliable | `{"msg"}` (also sent before the server closes the socket: kick, anti-cheat, account change) |
 | `pong` | lossy | `{}` |
 
 *Lossy* messages are dropped if the client's 256-message send queue is
@@ -290,7 +576,8 @@ full; if a *reliable* message does not fit, the client is disconnected.
 Examples (abridged):
 
 ```json
-{"t":"hello","name":"Alice","guest":false}
+{"t":"hello","name":"Alice","guest":false,"key":"q8Zb…=","signed":true,
+ "demo":{"enabled":true,"idleMinutes":3,"rotateMinutes":6}}
 {"t":"lobby","rooms":[{"id":"r3","name":"Friday night","host":"Alice","level":"Polder Wars",
   "levelId":"u-3f9c2a0d11aa47e0","state":"lobby","players":2,"max":4,"open":2}],"online":["Alice","Bob_1"]}
 {"t":"start","room":"r1","you":0,"cam":[11.5,37.5],
@@ -344,7 +631,7 @@ time), `melee`, `boom` (splash, `d` radius), `death`, `collapse`, `work`,
 |---|---|---|
 | HTTP header bytes | 16 KiB | `main.go` `MaxHeaderBytes` |
 | Header / read / idle timeout | 10 s / 30 s / 120 s | `main.go` |
-| REST body | 1 MiB | `server.go` `maxBody` |
+| REST body | `security.maxBodyBytes` (1 MiB; 64 KiB..16 MiB) | `server.go` `limit` |
 | WebSocket message | 16 KiB | `MaxMessageBytes` |
 | Chat message | 300 runes | `MaxChatLen` |
 | Global chat history | 50 | `hub.go` |
@@ -352,10 +639,16 @@ time), `melee`, `boom` (splash, `d` radius), `death`, `collapse`, `work`,
 | Production queue | 10 | `game.MaxQueue` |
 | Client send queue | 256 messages | `hub.go` |
 | Room command channel / per-tick commands | 512 / 1024 | `room.go` |
-| Concurrent rooms | `-max-rooms` (200) | `hub.newRoom` |
+| Concurrent rooms | `server.maxRooms` / `-max-rooms` (200) | `hub.newRoom` |
+| Demo rooms | `game.demo.maxRooms` (10) | `room_extra.go` |
 | Players per game | 2..8 | `game.MaxPlayers` |
-| Session lifetime | 7 days (in memory) | `sessionTTL` |
+| Session lifetime | `security.sessionTTL` (7 days, in memory) | `auth.go` |
 | Level size / objects / starts | 24..128 / 6 000 / 2..8 | `level.go` |
 | Custom levels | 50 per user, 5 000 total | `store.go` |
+| Saved games | `game.maxSavesPerUser` (20; 0 disables) per user, 8 MiB each | `store/admin.go` |
+| Save rate | 1 per 10 s, burst 2, per connection | `hub.go` |
 | Scores kept | 25 per level | `store.go` |
+| Anti-cheat flags kept | 50 per account | `store/admin.go` |
+| Admin note | 300 characters | `admin.go` |
+| Audit entries returned | 300 | `admin.go` |
 | Rate-limiter keys | 100 000 (new keys refused beyond) | `ratelimit.go` |

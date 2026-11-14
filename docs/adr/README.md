@@ -17,6 +17,12 @@ Format: Michael Nygard (Status / Context / Decision / Consequences); see
 | [0010](0010-server-side-fog-filtering.md) | Fog-of-war filtering on the server | Accepted |
 | [0011](0011-data-driven-definitions.md) | Data-driven unit/tech definitions scaled by age | Accepted |
 | [0012](0012-embedded-static-assets.md) | Embedded static assets via `go:embed` | Accepted |
+| [0013](0013-yaml-configuration.md) | YAML configuration file with flag/env overrides | Accepted |
+| [0014](0014-totp-mfa-without-dependencies.md) | TOTP multi-factor authentication without external dependencies | Accepted |
+| [0015](0015-layered-anti-cheat.md) | Layered anti-cheat on top of the authoritative server | Accepted |
+| [0016](0016-server-side-save-games.md) | Server-side save games | Accepted |
+| [0017](0017-naval-movement-domain.md) | Naval movement domain via a context flag | Accepted |
+| [0018](0018-demo-spectator-rooms.md) | Demo (attract) mode as spectator rooms | Accepted |
 
 New ADR: copy the structure of an existing one, take the next number, add a
 row here and link it from [../asr.md](../asr.md) if it serves a requirement.

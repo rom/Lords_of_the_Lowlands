@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-//go:embed index.html editor.html css js
+//go:embed index.html editor.html admin.html css js
 var files embed.FS
 
 // FS returns the static file system.

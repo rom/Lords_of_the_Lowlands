@@ -28,8 +28,10 @@
     <form id="authform" autocomplete="on">
       <label>Name <input id="authname" name="username" autocomplete="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_\-]{3,20}"></label>
       <label id="pwrow">Password <input id="authpw" type="password" name="password" autocomplete="current-password" minlength="8" maxlength="128"></label>
+      <label id="mfarow" class="hidden">Authenticator code <input id="authcode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"></label>
       <button class="btn primary" type="submit" id="authbtn">Sign in</button>
       <p class="err" id="autherr"></p>
+      <p class="ok" id="authmsg"></p>
     </form>
     <p class="fine">Guests can play everything; only registered lords appear in the hall of fame and can publish levels.</p>
   </section>
@@ -40,7 +42,9 @@
       <button class="btn big" data-go="skirmish">Skirmish vs Computer</button>
       <button class="btn big" data-go="lobby">Multiplayer</button>
       <a class="btn big" href="editor.html">Level Editor</a>
+      <button class="btn big" data-go="loadgame" id="loadbtn">Load Game</button>
       <button class="btn big" data-go="halloffame">Hall of Fame</button>
+      <a class="btn big hidden" href="admin.html" id="adminlink">Administration</a>
       <button class="btn big" data-go="settings">Settings</button>
       <button class="btn" id="logout">Sign out</button>
     </nav>
@@ -52,7 +56,7 @@
     <p class="sub">Seventeen chapters of history and beyond. Each begins in one age and lets you advance to the next.</p>
     <div class="campaign-grid" id="campgrid"></div>
     <div class="row">
-      <label>Difficulty <select id="campdiff"><option value="">Level default</option><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
+      <label>Difficulty <select id="campdiff" class="diffsel" data-default="Level default"></select></label>
       <button class="btn" data-go="menu">Back</button>
     </div>
   </section>
@@ -62,12 +66,13 @@
     <div class="form-grid">
       <label>Map <select id="skmap"><option value="random">Random map</option></select></label>
       <label>Theme <select id="sktheme"></select></label>
+      <label>Map type <select id="skmaptype"></select></label>
       <label>Size <select id="sksize"><option value="56">Small</option><option value="72" selected>Medium</option><option value="96">Large</option><option value="120">Huge</option></select></label>
       <label>Water <input id="skwater" type="range" min="0" max="100" value="30"></label>
       <label>Start age <select id="skstart"></select></label>
       <label>Final age <select id="skmax"></select></label>
       <label>Opponents <select id="skopp"><option>1</option><option>2</option><option>3</option><option>5</option><option>7</option></select></label>
-      <label>Difficulty <select id="skdiff"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select></label>
+      <label>Difficulty <select id="skdiff" class="diffsel"></select></label>
     </div>
     <div class="row"><button class="btn primary" id="skgo">Start</button><button class="btn" data-go="menu">Back</button></div>
   </section>
@@ -124,7 +129,32 @@
       <label>Music <input id="vmusic" type="range" min="0" max="100"></label>
       <label class="check"><input id="vmute" type="checkbox"> Mute all</label>
     </div>
+    <div id="security" class="hidden">
+      <h3>Account security</h3>
+      <p class="fine" id="mfastatus"></p>
+      <div class="row"><button class="btn" id="mfaon">Enable authenticator (MFA)</button>
+      <input id="mfaoffcode" placeholder="code" maxlength="6" class="short"><button class="btn" id="mfaoff">Disable MFA</button></div>
+    </div>
     <div class="row"><button class="btn" id="settingsback">Back</button></div>
+  </section>
+
+  <section id="mfa" class="screen panel hidden">
+    <h2>Set up two-factor sign-in</h2>
+    <p class="sub">Add this account to an authenticator app (Google Authenticator, Aegis, 1Password …), then enter the 6-digit code.</p>
+    <p class="fine">Secret key</p>
+    <p class="secret" id="mfasecret"></p>
+    <p class="fine">Or paste this setup link into your app:</p>
+    <p class="secret small" id="mfauri"></p>
+    <form id="mfaform" class="row"><input id="mfacode" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"><button class="btn primary">Confirm</button></form>
+    <p class="err" id="mfaerr"></p>
+    <div class="row"><button class="btn" id="mfacancel">Sign out</button></div>
+  </section>
+
+  <section id="loadgame" class="screen panel wide hidden">
+    <h2>Saved Games</h2>
+    <p class="sub">Resume exactly where you left off — same age, army, buildings and stockpiles.</p>
+    <table class="results" id="savelist"></table>
+    <div class="row"><button class="btn" data-go="menu">Back</button></div>
   </section>
 </main>
 
@@ -143,6 +173,7 @@
   <div id="tooltip" class="hidden"></div>
 </div>
 <div id="overlay" class="hidden"></div>
+<div id="demobanner" class="hidden"><b>DEMO</b> <span id="demotitle"></span> · press any key or click to play</div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -126,6 +126,17 @@ stats) and **per-age rosters** (name, sprite, projectile, flying, splash):
 | Ram | melee: range 0.9, no projectile, no minimum range |
 | Gunpowder ranged | age ≥ 8: range 5.5 |
 
+Boats are generated separately by `buildNaval()` (all `Naval: true`,
+trained at the `dock`):
+
+| Line | HP | Atk | Armor | Range | Reload | Speed | Sight | Train s | Base cost | Pop | Ages |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| fisher | 45 | — | 0 | 0.7 | 1.5 | 1.4 | 5 | 14 | 60 W | 1 | 1–16 |
+| naval (warship) | 130 | 7 | 0.15 | 5.5 | 2.2 | 1.45 | 7 | 26 | 20 F 110 W 45 G | 2 | 1–14 |
+
+HP and attack × `ageScale`, cost × `costScale`; warships charge gold as food
+before age 2 and `round(20 + 8·(age−10))` energy from age 10.
+
 A building always trains the **best unit of its line for the owner's
 current age** (`BestUnit`), whatever id the client requested; units already
 on the field are not upgraded.
@@ -143,6 +154,10 @@ on the field are not upgraded.
 | **mounted** | 1 | 1 | **1.6** | 1 | **1.8** | 1 | 1 |
 | **siege** | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 | 0.7 | **3.5** |
 | animal | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+
+Boats: attacker class `naval` deals ×1.3 to buildings and ×1.2 to `fisher`
+and `naval` targets, ×1 otherwise; siege deals 0.7 to boats; all other
+classes deal ×1 to boats.
 
 The resulting cycle: infantry → mounted → ranged → infantry, with siege as
 the building breaker that every other line (especially mounted) punishes.
@@ -185,6 +200,7 @@ Five resources: Food, Wood, Stone, Gold, Energy (`Res [5]float64`).
 | stone | Stone | 700 | 0.8 | yes |
 | crystal | Energy | 600 | 0.7 | yes |
 | carcass | Food | animal's food (deer 120, boar 260, mammoth 650) | 1.3 | no |
+| fish | Food | 350 | 1.1 | no (in water; boats only) |
 
 ### 5.2 Gathering loop
 
@@ -202,14 +218,15 @@ stateDiagram-v2
 
 | Quantity | Formula |
 |---|---|
-| Gather rate (per s) | `0.7 · rateMult · gatherMul · (1 + 0.06·age) · aiBonus` |
+| Gather rate (per s) | `0.7 · rateMult · gatherMul · (1 + 0.06·age) · aiBonus`, × `fishMul` for fish, × `miningMul` for gold and stone |
 | Farm rate | as above with rateMult 0.8 |
 | Carry capacity | `10 + unitAge` |
 | Worker move speed | × `1 + 0.03 · techsResearched` |
-| Drop-offs | town centre: F/W/S/G · granary: F · lumber camp: W · mining camp: S/G/Energy |
+| Drop-offs | town centre: F/W/S/G · granary: F · lumber camp: W · mining camp: S/G/Energy · dock: F (the only drop-off for boats) |
 
-**Farms** are 3×3, non-blocking buildings holding `320 · (1 + 0.1·age)`
-food; one worker gathers from a farm until it is exhausted, then the farm
+**Farms** are 3×3, non-blocking buildings holding
+`320 · (1 + 0.25·age) · farmBase · farmMul` food (`farmBase` 0.6 on desert,
+1.15 on riverland, else 1; `farmMul` from farm techs); one worker gathers from a farm until it is exhausted, then the farm
 disappears (`depleted` event). Workers ordered to a foundation build it;
 after finishing a farm they start farming it, after finishing a drop-off
 they gather the nearest matching resource within 7 tiles.
@@ -243,19 +260,44 @@ Research time is `25 + 2·age` s; gold is charged as food before age 2;
 from age 11 each tech also costs `50 + 20·(age − 11)` energy. Each tech
 also makes workers 3 % faster.
 
+**Map-specific technologies** (`mapTechs`) have a `mapTypes` list;
+`TechDef.AllowedOn(level.mapType)` gates research (`queueResearch`).
+
+| id | Age | Kind | Effect | Map types |
+|---|---|---|---|---|
+| `irrigation` | 1 | farm | `farmMul += 0.5` | desert, riverland |
+| `qanats` | 5 | farm | `farmMul += 0.4` | desert |
+| `terraces` | 2 | farm | `farmMul += 0.25` | highland |
+| `fishing_nets` | 2 | fish | `fishMul += 0.3` | coastal, riverland, lakes |
+| `navigation` | 4 | naval | `navalMul += 0.2` | coastal, riverland, lakes |
+| `steam_ships` | 10 | naval | `navalMul += 0.25` | coastal, riverland, lakes |
+| `deep_mining` | 3 | mining | `miningMul += 0.3` | highland, desert |
+| `caravans` | 4 | gather | `gatherMul += 0.1` | desert, inland |
+
+`farmMul` applies to farms placed afterwards. `navalMul` scales the hit
+points of new and existing boats and the attack of warships.
+
 ## 7. Computer opponent
 
 `internal/game/ai.go`. The AI is a player like any other: it reads the
 same `Game` state but issues orders through the same functions as
 `Apply` (`queueUnit`, `queueResearch`, `Apply(CmdBuild/CmdAMove)`), so it
-pays costs, respects population, age and placement rules. Its only
-advantage is the difficulty multiplier.
+pays costs, respects population, age and placement rules. Its advantages
+are fixed by its `DifficultyProfile` (`Profiles` in `ai.go`):
 
-| Difficulty | `bonus` (gather, build, train speed) | First attack size |
-|---|---|---|
-| easy | 0.75 | 14 |
-| normal | 1.0 | 10 |
-| hard | 1.3 | 8 |
+| Difficulty | `Bonus` (gather, build, train speed) | `AttackSize` | `FirstAttack` (min) | `Trickle` (res/s each) | `FullVision` |
+|---|---|---|---|---|---|
+| `super_easy` | 0.55 | 20 | 12 | — | — |
+| `easy` | 0.75 | 14 | 7 | — | — |
+| `normal` | 1.0 | 10 | 4 | — | — |
+| `hard` | 1.3 | 8 | 3.5 | — | — |
+| `super_hard` | 1.6 | 7 | 3 | 0.3 | — |
+| `insane` | 2.0 | 6 | 2.5 | 0.8 | yes |
+
+`Trickle` is added every tick in `Step` for every resource (energy only from
+age 10). `FullVision` marks every tile visible for that AI in
+`updateVisibility` (it only affects the AI itself; snapshots for humans are
+unchanged). The profile's `Defend` flag controls whether the AI pulls its army back to fight raiders near its town centre; `super_easy` does not defend.
 
 Every second (`think`) it runs four planners:
 
@@ -264,7 +306,9 @@ Every second (`think`) it runs four planners:
 | economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 35/25/10/18/12 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5th `think` (every 5 s) one worker moves from the most over-stocked to the scarcest resource; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
 | construction | houses when within 6 of the cap; drop-off camps when a resource is > 9 tiles from one; a fixed build plan (barracks, range, academy, stable, workshop, tower, generator, then second barracks/range/stable) gated by age and worker count; more farms when wild food runs out |
 | research | advance the age when it has ≥ `10 + age` workers and can pay; otherwise academy techs in the order gather → attack → armor → hp, keeping half the next age cost in reserve |
-| military | trains the best unit at every military building (≤ 2 queued), saving for the next age once a minimum army exists; defends against visible enemies within 14 tiles of its town centre; after minute 4, when the army reaches the attack size (+ age/2), it stages at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; when the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2 |
+| military | trains the best unit at every military building (≤ 2 queued), saving for the next age once a minimum army exists; defends against visible enemies within 14 tiles of its town centre; after `FirstAttack` minutes, when the army reaches the attack size (+ age/2), it stages at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; when the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2 |
+
+| naval (`naval`) | only if `Game.Naval` and the dock's age is reached: builds one dock on the nearest explored water tile within 30 tiles of the town centre (needs ≥ 8 workers; at most one dock placement per 40 s); trains fishing boats up to `3 + age/3`, then warships when it has > 4 military units and half the next age cost; sends idle boats to the nearest fish within 40 tiles |
 
 If its town centre is lost the AI tries to rebuild one with any surviving
 worker. In campaign quick games all AI opponents share team 2 against the
@@ -292,7 +336,7 @@ human on team 1.
 
 Limitation: remembered enemy buildings are reported with their *current*
 state (HP fraction, construction progress, destruction) rather than a frozen
-last-seen copy. See [security.md](security.md#35-known-limitations).
+last-seen copy. See [security.md](security.md#38-known-limitations).
 
 ## 9. Pathfinding and movement
 
@@ -310,6 +354,7 @@ last-seen copy. See [security.md](security.md#35-known-limitations).
 | Repath | every 0.8–1.5 s when the path is exhausted, when a new building blocks the way, or when a chased unit moved > 2 tiles from the path end |
 | Formations | group moves spread units on a √n × √n grid with 0.8-tile spacing around the target |
 | Flying units | move in straight lines, ignore terrain and occupancy, never separate from ground units |
+| Naval units | same A*, but `terrainOK` accepts only water and fords while `Game.navalCtx` is set ([ADR-0017](adr/0017-naval-movement-domain.md)); the flag is set around boat updates, spawning at a dock, orders in `Apply`, separation and AI fishing; boats only separate from boats |
 
 ## 10. Snapshot protocol and compression
 
@@ -431,11 +476,12 @@ A level is a JSON-serialised `game.Level`:
 | `objective` | `{type, minutes?}` | `conquest`, `survive` (1..120 min), `advance` |
 | `startRes` | `[5]float` | 0..100 000 each; all zero → defaults |
 | `tiles` | string | `width·height` digits `'0'..'6'` (row-major) |
-| `objects` | `[{k,x,y}]` | ≤ 6 000; kinds `tree, berry, gold, stone, crystal, deer, boar, mammoth` |
+| `objects` | `[{k,x,y}]` | ≤ 6 000; kinds `tree, berry, gold, stone, crystal, fish, deer, boar, mammoth` |
 | `starts` | `[{x,y}]` | 2..8 start positions |
 | `maxPlayers` | int | derived from `len(starts)` |
 | `opponents` | int | default AI count for quick play |
-| `difficulty` | string | `easy`, `normal`, `hard` |
+| `difficulty` | string | `super_easy`, `easy`, `normal` (default), `hard`, `super_hard`, `insane` |
+| `mapType` | string | `inland` (default), `coastal`, `riverland`, `lakes`, `desert`, `highland` |
 | `gen` | `GenParams` | generator parameters instead of tiles (built-in levels only) |
 
 Terrain codes: `0` grass, `1` dirt, `2` sand, `3` water (impassable; void in
@@ -453,7 +499,17 @@ always have `gen` cleared, so they must carry explicit tiles.
 
 ### 13.3 Procedural generation
 
-`generate(w, h, players, gen, theme, startAge)` — deterministic per seed:
+`generate(w, h, players, gen, theme, mapType, startAge)` — deterministic per seed.
+`gen.forMapType(mapType)` first adjusts the parameters:
+
+| Map type | Generator changes |
+|---|---|
+| `inland` | none |
+| `coastal` | water ≤ 0.25; an ocean along one side (noisy edge, beach), start ring shifted away from it with radius `0.25 · min(w,h)` |
+| `riverland` | river forced on, water ≤ 0.3 |
+| `lakes` | water ≥ 0.6, no river |
+| `desert` | no water, no river, forest × 0.3, animals × 0.4, riches + 0.4; grass turns to sand except on dirt; `2 + w·h/2500` oases (water + grass + palms) away from starts |
+| `highland` | mountains ≥ 0.65, water × 0.4, riches + 0.3 |
 
 1. Start positions on a ring of radius `0.68 · min(w,h)/2` at a random
    offset angle.
@@ -471,6 +527,10 @@ always have `gen` cleared, so they must carry explicit tiles.
    moon/mars/space), deer and one mammoth (≤ Neolithic) or boar.
 7. Extra contested clusters scaled by map area and `riches`, ≥ 14 tiles from
    any start.
+8. On naval map types (`NavalMap`: coastal, riverland, lakes on earthly
+   themes) `placeFish` scatters fish on water 2–4 tiles from shore (2.5 %
+   chance per tile) and puts up to 8 fish near the closest such water to
+   each start (if within 22 tiles).
 
 Built-in campaign levels store only `gen` and are materialised for the
 actual number of players when a game starts; `GET /api/levels/{id}`
@@ -501,3 +561,78 @@ Score (`Game.Score`):
 `gathered/10 + killValue/5 + 60·techs + 400·(age − startAge) + 15·built + 5·trained`,
 plus, for winners, `2000 + max(0, 1500 − 30·minutes)`. Only registered human
 players' results are stored (top 25 per level).
+
+## 16. Map types and naval play
+
+| Rule | Code |
+|---|---|
+| Map types | `MapTypes` = inland, coastal, riverland, lakes, desert, highland; `""` = inland (`ValidMapType`) |
+| Navigable map | `Game.Naval` = earthly theme (not moon/mars/space) **and** not desert **and** ≥ 2 % water tiles |
+| Fish generated | only on `NavalMap` types (coastal, riverland, lakes); custom levels may place fish by hand |
+| Farm base | `farmBase` 0.6 desert, 1.15 riverland, else 1 |
+| Dock | age 1, 3×3, 150 W; `CmdBuild` requires `Game.Naval` and ≥ 2 water tiles on the ring around its footprint (`coastal`); trains `fisher` and `naval`; food drop-off |
+| Boats | `UnitDef.Naval`; `fisher_<age>` (ages 1–16) and one warship per age 1–14 (`shipRoster`); they spawn on water next to the dock |
+| Fishing | with `navalCtx` set `nearestResource` returns only fish; land workers never target fish; boats deliver only to docks |
+| Combat | class `naval` ×1.3 vs buildings, ×1.2 vs boats; `navalMul` scales boat HP and warship attack |
+
+## 17. Save games
+
+`internal/game/save.go` ([ADR-0016](adr/0016-server-side-save-games.md)).
+
+| Part | Content |
+|---|---|
+| `SaveState` | `version` (`SaveVersion` = 1), `level` (explicit tiles; objects and `gen` dropped), `tick`, `nextId`, `players`, `ents` |
+| `SavePlayer` | name, team, colour, AI flag and difficulty, resources, age, techs, defeat, statistics, explored fog (RLE), remembered buildings, 8 modifiers (gather, attack, armour, hp, farm, fish, naval, mining), AI memory (`SaveAI`) |
+| `SaveEnt` | id, kind, type, owner, position, HP, order/target, carry, building state, queue (`SaveQItem`), rally, farm food, resource amount |
+| `LoadGame` | rejects: bad JSON, other version, invalid level, 0 or > 8 players, negative tick, NaN/Inf, ages out of range, unknown difficulty/unit/building/resource/tech, duplicate or out-of-range ids, wrong owners (animals belong to nature), positions off the map, unknown orders, oversized queues; then rebuilds occupancy, population and visibility |
+| `SetController` | hands a saved player to a human or to an AI (new AI if the difficulty changed) when the restored room starts |
+
+Server side: `Hub.saveGame` (registered, not in a demo, game running,
+rate-limited) stores `{meta, game}`; `Hub.restoreGame` builds a lobby room
+with `Room.restored` and one slot per saved player
+([architecture §4.5](architecture.md#45-save-and-restore)).
+
+## 18. Demo mode
+
+| Aspect | Behaviour |
+|---|---|
+| Trigger | client `idleCheck` every 5 s: demo enabled, connected, not in a room or game, on menu/campaign/skirmish/hall of fame/load screen, no mouse/key/touch/wheel input (mouse moves > 3 px count) for `idleMinutes` → `{"t":"demo"}` |
+| Match | `demoLevel`: 50 % a random campaign chapter (2–4 AIs, new seed), else a skirmish: random start age, earthly theme below age 14 and moon/mars/space from 14, random map type, size 56–80, 2–4 players, final age start + 2; AI difficulties random from normal, hard, super_hard, insane |
+| View | `start` with `you: -1`, `demo: true`; `Snapshot(-1)` shows everything; `game.js` hides the HUD (`spectator` class), zooms to 0.85 and `autoCamera` drifts every 9 s to a random busy unit (or a building) |
+| Rotation | `nextDemo` after `rotateMinutes` or game over |
+| Exit | any input → `exitDemo` sends `leave`; the room stops when it has no spectators |
+| Isolation | room ids `d<n>`, `Room.Demo`; not in `lobby` messages, not joinable (state `playing`), no results recorded, no saving; counted as `rooms{state="demo"}` |
+
+## 19. Anti-cheat
+
+See [ADR-0015](adr/0015-layered-anti-cheat.md) and
+[security.md §3.5](security.md#35-anti-cheat) for weights and thresholds.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Key, sequence, score, APM window | `cheatState` per `Client` | key 32 random bytes, sent base64 in `hello` |
+| MAC | `Mac(key, seq, payload)` = HMAC-SHA256 over `"<seq>:<payload>"`, hex | `hmac.Equal` |
+| Client signer | `integrity.js` `makeSigner` | key and counter in a closure; pure-JS SHA-256/HMAC (works without `crypto.subtle` on plain HTTP) |
+| Integrity | `integrityReport` hashes `/js/{main,game,render,sprites,audio,net,util,integrity}.js` (fetched with `force-cache`); server compares with `hashStatic(web.FS())` computed at start-up | missing report entries for served files are not penalised; reported paths must match |
+| Inspection | `inspectCommand(g, cmd)` before `Apply`, inside `Room.tick` | uses `Game.Exists`, `Knows`, `ExploredAt`, `OwnerOf` |
+| Reaction | `Hub.report` | `warn` once at `warnScore`; at `kickScore`: `Resign`, `Slot.flagged`, `AddFlag`, audit, `error`, close |
+
+## 20. Metrics
+
+`internal/server/metrics.go`. Counters are atomics incremented on the hot
+paths (HTTP middleware `instrument`, WebSocket reader/writer, snapshots,
+`Room.tick`, login, save/restore, anti-cheat). Two latency histograms
+(fixed buckets 0.5 ms … 1 s, sum, count, max, plus a 1 024-sample ring for
+p50/p95/p99): `Room.tick` duration (commands + `Step` + snapshot fan-out) and
+HTTP request duration (excluding `/ws`). `collect()` builds the `Stats`
+document from counters, hub/room state and `runtime.ReadMemStats`; `/metrics`
+renders the same data in Prometheus text format. Names:
+[api.md](api.md#diagnostics).
+
+## 21. Configuration
+
+`internal/config` ([ADR-0013](adr/0013-yaml-configuration.md)) defines the
+`Config` tree; `server.Config.Settings` carries it into the server, which
+reads it for rate limits (`security`), session TTL, body limit, account
+policy, save limits, demo, anti-cheat and metrics access. `nil` means
+`config.Default()` (used by tests).

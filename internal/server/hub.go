@@ -24,6 +24,9 @@ type Client struct {
 	closed chan struct{}
 	once   sync.Once
 	conn   *websocket.Conn
+	cheat  *cheatState
+	saveL  *Limiter
+	signed bool
 }
 
 func (c *Client) close() {
@@ -37,6 +40,9 @@ func (c *Client) enqueue(b []byte, lossy bool) {
 	case c.send <- b:
 	case <-c.closed:
 	default:
+		if c.hub != nil {
+			c.hub.s.metrics.wsDropped.Add(1)
+		}
 		if !lossy {
 			c.close()
 		}
@@ -105,7 +111,8 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(MaxMessageBytes)
 	c := &Client{hub: h, name: ss.Name, guest: ss.Guest, send: make(chan []byte, 256),
-		chatL: NewLimiter(1, 5), cmdL: NewLimiter(25, 60), closed: make(chan struct{}), conn: conn}
+		chatL: NewLimiter(1, 5), cmdL: NewLimiter(25, 60), closed: make(chan struct{}), conn: conn,
+		cheat: newCheatState(), saveL: NewLimiter(0.1, 2), signed: h.s.set.AntiCheat.Enabled && h.s.set.AntiCheat.SignedCmds}
 	h.register(c)
 	ctx, cancel := context.WithCancel(r.Context())
 	go func() {
@@ -130,6 +137,8 @@ func (h *Hub) writer(ctx context.Context, c *Client) {
 			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := c.conn.Write(wctx, websocket.MessageText, b)
 			cancel()
+			h.s.metrics.wsOut.Add(1)
+			h.s.metrics.wsBytesOut.Add(int64(len(b)))
 			if err != nil {
 				c.close()
 				return
@@ -155,6 +164,7 @@ func (h *Hub) reader(ctx context.Context, c *Client) {
 		if typ != websocket.MessageText {
 			continue
 		}
+		h.s.metrics.wsIn.Add(1)
 		m, err := ParseClientMsg(b)
 		if err != nil {
 			c.errorMsg(err.Error())
@@ -179,14 +189,15 @@ func (h *Hub) register(c *Client) {
 	h.byName[key] = c
 	hist := append([]chatOut(nil), h.history...)
 	h.mu.Unlock()
-	if seat != nil {
-		seat.handover(old, c)
-	}
-	c.sendJSON(map[string]interface{}{"t": "hello", "name": c.name, "guest": c.guest}, false)
+	d := h.s.set.Game.Demo
+	c.sendJSON(map[string]interface{}{"t": "hello", "name": c.name, "guest": c.guest, "key": c.cheat.keyString(), "signed": c.signed,
+		"demo": map[string]interface{}{"enabled": d.Enabled, "idleMinutes": d.IdleMinutes, "rotateMinutes": d.RotateMinutes}}, false)
 	for _, m := range hist {
 		c.sendJSON(m, false)
 	}
-	if seat == nil {
+	if seat != nil {
+		seat.handover(old, c)
+	} else {
 		h.rejoin(c)
 	}
 	h.broadcastLobby()
@@ -212,7 +223,9 @@ func (h *Hub) broadcastLobby() {
 	h.mu.Lock()
 	rooms := make([]roomSummary, 0, len(h.rooms))
 	for _, r := range h.rooms {
-		rooms = append(rooms, r.summary())
+		if !r.Demo {
+			rooms = append(rooms, r.summary())
+		}
 	}
 	sort.Slice(rooms, func(i, j int) bool { return rooms[i].ID < rooms[j].ID })
 	names := make([]string, 0, len(h.byName))
@@ -264,8 +277,21 @@ func (h *Hub) handle(c *Client, m *ClientMsg) {
 		}
 		h.broadcastLobby()
 	case "cmd":
+		if c.signed {
+			if m.P == "" {
+				h.report(c, "unsigned command", wBadMAC)
+				return
+			}
+			if ok, why, w := c.cheat.verify(m.N, m.P, m.Mac); !ok {
+				h.report(c, why, w)
+				return
+			}
+		}
 		if !c.cmdL.Allow("") {
 			return
+		}
+		if h.s.set.AntiCheat.Enabled && c.cheat.rate(time.Now(), h.s.set.AntiCheat.MaxAPM) {
+			h.report(c, "inhuman action rate", wAPM)
 		}
 		h.mu.Lock()
 		r := c.room
@@ -273,7 +299,28 @@ func (h *Hub) handle(c *Client, m *ClientMsg) {
 		if r != nil {
 			r.command(c, *m.Cmd)
 		}
+	case "integrity":
+		h.integrityCheck(c, m)
+	case "save":
+		h.saveGame(c, m)
+	case "restore":
+		h.restoreGame(c, m)
+	case "demo":
+		h.startDemo(c)
 	}
+}
+
+// kick disconnects a player by name; it reports whether they were online.
+func (h *Hub) kick(name, msg string) bool {
+	h.mu.Lock()
+	c := h.byName[strings.ToLower(name)]
+	h.mu.Unlock()
+	if c == nil {
+		return false
+	}
+	c.errorMsg(msg)
+	c.close()
+	return true
 }
 
 func (h *Hub) chat(c *Client, m *ClientMsg) {

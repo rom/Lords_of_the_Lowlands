@@ -1,5 +1,6 @@
 // Application shell: authentication, menus, lobby, rooms and chat.
-import { el, $, $$, api, TEAM, TEAM_NAMES } from './util.js';
+import { el, $, $$, api, TEAM, TEAM_NAMES, DIFFICULTIES, MAP_TYPES } from './util.js';
+import { makeSigner, integrityReport } from './integrity.js';
 import { Net } from './net.js';
 import { GameClient, objectiveText } from './game.js';
 import { Renderer } from './render.js';
@@ -16,15 +17,34 @@ class App {
     this.game = null;
     this.room = null;
     this.net = new Net((m) => this.onMsg(m), (s) => this.onNetState(s));
+    this.sign = null;
+    this.lastInput = Date.now();
     this.bindUI();
     this.boot();
   }
 
   async boot() {
     try { this.defs = await api('/api/defs'); } catch (e) { $('#autherr').textContent = 'Server unavailable'; }
+    try { this.pub = await api('/api/config'); } catch (e) { this.pub = { registration: 'open', allowGuests: true, demo: { enabled: false } }; }
+    this.applyPolicy();
+    for (const sel of $$('.diffsel')) {
+      sel.replaceChildren(...(sel.dataset.default ? [el('option', { value: '', text: sel.dataset.default })] : []),
+        ...DIFFICULTIES.map(([v, t]) => el('option', { value: v, text: t, selected: v === 'normal' && !sel.dataset.default ? '' : null })));
+    }
+    $('#skmaptype').replaceChildren(...MAP_TYPES.map(([v, t]) => el('option', { value: v, text: t })));
     if (this.defs) this.backdrop();
     try { this.me = await api('/api/me'); } catch (e) { this.me = null; }
     if (this.me) this.loggedIn(); else this.show('login');
+  }
+
+  // Adapt the login form to the server's account policy.
+  applyPolicy() {
+    const p = this.pub;
+    const reg = $('.tab[data-tab=register]'), guest = $('.tab[data-tab=guest]');
+    reg.classList.toggle('hidden', p.registration === 'closed');
+    reg.textContent = p.registration === 'approval' ? 'Request account' : 'Register';
+    guest.classList.toggle('hidden', !p.allowGuests);
+    $('#authpw').minLength = p.minPasswordLength || 8;
   }
 
   show(id) {
@@ -36,6 +56,7 @@ class App {
     if (id === 'lobby') this.loadLevelsInto($('#newlevel'));
     if (id === 'skirmish') this.loadSkirmish();
     if (id === 'settings') this.loadSettings();
+    if (id === 'loadgame') this.loadSaves();
   }
 
   bindUI() {
@@ -50,12 +71,23 @@ class App {
     $('#authform').addEventListener('submit', async (e) => {
       e.preventDefault(); initAudio(); sfx('click');
       const name = $('#authname').value.trim(), password = $('#authpw').value;
+      $('#authmsg').textContent = '';
       try {
         const path = mode === 'guest' ? '/api/guest' : mode === 'register' ? '/api/register' : '/api/login';
-        this.me = await api(path, { method: 'POST', body: mode === 'guest' ? { name } : { name, password } });
+        const body = mode === 'guest' ? { name } : { name, password };
+        const code = $('#authcode').value.trim();
+        if (mode === 'signin' && code) body.code = code;
+        const res = await api(path, { method: 'POST', body });
         $('#autherr').textContent = '';
+        if (res.pending) { $('#authmsg').textContent = res.message; return; }
+        this.me = res;
+        $('#mfarow').classList.add('hidden'); $('#authcode').value = '';
+        if (res.mfaSetup) { this.mfaSetup(); return; }
         this.loggedIn();
-      } catch (err) { $('#autherr').textContent = err.message; sfx('error'); }
+      } catch (err) {
+        if (err.data && err.data.mfa) { $('#mfarow').classList.remove('hidden'); $('#authcode').focus(); }
+        $('#autherr').textContent = err.message; sfx('error');
+      }
     });
     document.addEventListener('click', (e) => {
       const go = e.target.closest('[data-go]');
@@ -90,6 +122,73 @@ class App {
     for (const id of ['vmaster', 'vsfx', 'vmusic']) $('#' + id).addEventListener('input', (e) => { audioSettings()[id.slice(1)] = e.target.value / 100; saveAudio(); });
     $('#vmute').addEventListener('change', (e) => { audioSettings().muted = e.target.checked; saveAudio(); });
     window.addEventListener('resize', () => { if (this.bg) this.bg.resize(); });
+    $('#mfaform').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/mfa/enable', { method: 'POST', body: { code: $('#mfacode').value.trim() } });
+        $('#mfaerr').textContent = '';
+        if (this.connected) this.show('settings'); else this.loggedIn();
+      } catch (err) { $('#mfaerr').textContent = err.message; sfx('error'); }
+    });
+    $('#mfacancel').addEventListener('click', () => $('#logout').click());
+    $('#mfaon').addEventListener('click', () => this.mfaSetup());
+    $('#mfaoff').addEventListener('click', async () => {
+      try { await api('/api/mfa/disable', { method: 'POST', body: { code: $('#mfaoffcode').value.trim() } }); this.loadSettings(); }
+      catch (err) { this.notify(err.message); }
+    });
+    // demo / attract mode: any input counts as activity and ends a demo
+    const activity = () => {
+      this.lastInput = Date.now();
+      if (this.game && this.game.spectator) this.exitDemo();
+    };
+    for (const ev of ['mousedown', 'keydown', 'touchstart', 'wheel']) window.addEventListener(ev, activity, { capture: true });
+    window.addEventListener('mousemove', (e) => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 3) activity(); }, { capture: true });
+    setInterval(() => this.idleCheck(), 5000);
+  }
+
+  idleCheck() {
+    const d = this.demoCfg;
+    if (!d || !d.enabled || this.game || !this.connected || this.room) return;
+    if (!['menu', 'campaign', 'skirmish', 'halloffame', 'loadgame'].includes(this.screen)) return;
+    if (Date.now() - this.lastInput > d.idleMinutes * 60000) {
+      this.lastInput = Date.now();
+      this.net.send({ t: 'demo' });
+    }
+  }
+
+  exitDemo() {
+    this.net.send({ t: 'leave' });
+    $('#demobanner').classList.add('hidden');
+    this.leaveGame(true);
+  }
+
+  async mfaSetup() {
+    try {
+      const r = await api('/api/mfa/setup', { method: 'POST', body: {} });
+      $('#mfasecret').textContent = r.secret.replace(/(.{4})/g, '$1 ').trim();
+      $('#mfauri').textContent = r.uri;
+      $('#mfacode').value = '';
+      this.show('mfa');
+    } catch (err) { this.notify(err.message); }
+  }
+
+  sendCmd(cmd) {
+    if (this.sign) this.net.send(this.sign(cmd)); else this.net.send({ t: 'cmd', cmd });
+  }
+
+  async loadSaves() {
+    const tbl = $('#savelist');
+    if (!this.me || this.me.guest) { tbl.replaceChildren(el('tr', {}, el('td', { text: 'Register an account to save and load games.' }))); return; }
+    let saves = [];
+    try { saves = await api('/api/saves'); } catch (e) { /* ignore */ }
+    if (!saves.length) { tbl.replaceChildren(el('tr', {}, el('td', { text: 'No saved games yet. Use “Save Game” in the in-game menu.' }))); return; }
+    tbl.replaceChildren(el('tr', {}, ...['Name', 'Level', 'Age', 'Time', 'Players', 'Saved', ''].map(h => el('th', { text: h }))),
+      ...saves.map(sv => el('tr', {},
+        el('td', { text: sv.name }), el('td', { text: sv.level }), el('td', { text: this.defs.ages[sv.age].name }),
+        el('td', { text: `${Math.round(sv.minutes)} min` }), el('td', { text: sv.players.join(', ') }),
+        el('td', { text: new Date(sv.created).toLocaleString() }),
+        el('td', {}, el('button', { class: 'btn small primary', text: 'Resume', onclick: () => this.net.send({ t: 'restore', save: sv.id }) }), ' ',
+          el('button', { class: 'btn small danger', text: 'Delete', onclick: async () => { await api('/api/saves/' + sv.id, { method: 'DELETE' }).catch(() => {}); this.loadSaves(); } })))));
   }
 
   loggedIn() {
@@ -107,13 +206,20 @@ class App {
     let stats = '';
     try { const me = await api('/api/me'); if (me.stats) stats = `Games ${me.stats.games} · Wins ${me.stats.wins} · Best ${me.stats.bestScore} · Campaign ${me.stats.campaign}/17`; this.me = me; } catch (e) { /* ignore */ }
     w.replaceChildren(el('div', { class: 'name', text: `⚜ ${this.me.name}` }), el('div', { class: 'fine', text: this.me.guest ? 'Guest — register to keep your glory' : stats }));
+    $('#adminlink').classList.toggle('hidden', !this.me.admin);
   }
 
   onNetState(s) { this.connected = s === 'open'; }
 
   onMsg(m) {
     switch (m.t) {
-      case 'hello': break;
+      case 'hello':
+        this.sign = m.signed ? makeSigner(m.key) : null;
+        this.demoCfg = m.demo;
+        integrityReport().then((r) => this.net.send(r)).catch(() => {});
+        break;
+      case 'warn': this.notify(m.msg); break;
+      case 'saved': if (this.game) this.game.toast(`Game saved: ${m.name}`); break;
       case 'lobby': this.renderLobby(m); break;
       case 'room': this.room = m; this.renderRoom(m); if (this.screen !== 'room' && !this.game) this.show('room'); break;
       case 'chat': this.chat(m); break;
@@ -192,7 +298,7 @@ class App {
     const opp = +$('#skopp').value, diff = $('#skdiff').value;
     if (map !== 'random') { this.net.send({ t: 'quick', level: map, opp, diff }); return; }
     const start = +$('#skstart').value; let max = +$('#skmax').value; if (max < start) max = start;
-    this.net.send({ t: 'quick', opp, diff, skirmish: { theme: $('#sktheme').value, size: +$('#sksize').value, startAge: start, maxAge: max, seed: Math.floor(Math.random() * 1e9), water: $('#skwater').value / 100 } });
+    this.net.send({ t: 'quick', opp, diff, skirmish: { theme: $('#sktheme').value, size: +$('#sksize').value, startAge: start, maxAge: max, seed: Math.floor(Math.random() * 1e9), water: $('#skwater').value / 100, mapType: $('#skmaptype').value } });
   }
 
   renderLobby(m) {
@@ -223,7 +329,7 @@ class App {
       kind.addEventListener('change', () => this.net.send({ t: 'slot', slot: i, kind: kind.value, team: s.team, diff: 'normal' }));
       let diff = null;
       if (s.kind === 'ai') {
-        diff = el('select', { disabled: host ? null : '' }, ...['easy', 'normal', 'hard'].map(d => el('option', { value: d, text: d, selected: s.diff === d ? '' : null })));
+        diff = el('select', { disabled: host ? null : '' }, ...DIFFICULTIES.map(([d, label]) => el('option', { value: d, text: label, selected: s.diff === d ? '' : null })));
         diff.addEventListener('change', () => this.net.send({ t: 'slot', slot: i, kind: 'ai', team: s.team, diff: diff.value }));
       }
       return el('tr', {}, el('td', {}, el('span', { class: 'swatch', style: `background:${TEAM[i]}` }), ` ${TEAM_NAMES[i]}`),
@@ -233,14 +339,17 @@ class App {
 
   startGame(m) {
     if (this.game) this.game.destroy();
+    $('#demobanner').classList.toggle('hidden', !m.demo);
+    if (m.demo) $('#demotitle').textContent = m.level.name;
     $('#screens').classList.add('hidden');
     $('#bg').classList.add('hidden');
     if (this.bgRaf) cancelAnimationFrame(this.bgRaf);
     this.game = new GameClient(this, m);
   }
 
-  leaveGame() {
-    this.net.send({ t: 'leave' });
+  leaveGame(sent) {
+    if (!sent) this.net.send({ t: 'leave' });
+    $('#demobanner').classList.add('hidden');
     if (this.game) this.game.destroy();
     this.game = null; this.room = null;
     $('#overlay').classList.add('hidden');
@@ -259,6 +368,14 @@ class App {
   }
 
   loadSettings() {
+    const reg = this.me && !this.me.guest;
+    $('#security').classList.toggle('hidden', !reg);
+    if (reg) api('/api/me').then((me) => {
+      $('#mfastatus').textContent = me.mfaEnabled ? 'Two-factor sign-in is enabled.' + (me.mfaRequired ? ' (required by the administrator)' : '') : 'Two-factor sign-in is off.';
+      $('#mfaon').classList.toggle('hidden', !!me.mfaEnabled);
+      $('#mfaoff').classList.toggle('hidden', !me.mfaEnabled || !!me.mfaRequired);
+      $('#mfaoffcode').classList.toggle('hidden', !me.mfaEnabled || !!me.mfaRequired);
+    }).catch(() => {});
     const s = audioSettings();
     $('#vmaster').value = s.master * 100; $('#vsfx').value = s.sfx * 100; $('#vmusic').value = s.music * 100; $('#vmute').checked = s.muted;
   }
@@ -313,4 +430,7 @@ function prettyErr(m) {
   return { 'not enough resources': 'Not enough resources', 'cannot build there': 'Cannot build there', 'queue full': 'Queue is full', 'not available in your age': 'Not available in your age' }[m] || m;
 }
 
-window.app = new App();
+// The app object is only exposed for development and automated tests; the
+// signing key lives in a closure inside it either way.
+const app = new App();
+if (new URLSearchParams(location.search).has('dev')) window.app = app;

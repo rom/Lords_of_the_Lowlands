@@ -195,6 +195,8 @@ type MapView struct {
 	Obj      Objective `json:"objective"`
 	MaxAge   int       `json:"maxAge"`
 	StartAge int       `json:"startAge"`
+	MapType  string    `json:"mapType"`
+	Naval    bool      `json:"naval"`
 }
 
 // Map returns the static map view.
@@ -203,7 +205,7 @@ func (g *Game) Map() MapView {
 	for i, t := range g.Tiles {
 		b[i] = '0' + t
 	}
-	return MapView{g.W, g.H, string(b), g.Level.Theme, g.Level.Name, g.Level.Description, g.Level.Objective, g.Level.MaxAge, g.Level.StartAge}
+	return MapView{g.W, g.H, string(b), g.Level.Theme, g.Level.Name, g.Level.Description, g.Level.Objective, g.Level.MaxAge, g.Level.StartAge, g.Level.MapType, g.Naval}
 }
 
 // StartPos returns a player's town centre position (for camera placement).

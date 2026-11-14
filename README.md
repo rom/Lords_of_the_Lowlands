@@ -20,23 +20,40 @@ effect and piece of music is generated procedurally at runtime.
 - **17-chapter campaign** (≥ 15 levels as required). Each chapter starts in one age and lets you advance to
   the next, with conquest, survival and "advance first" objectives, on temperate, desert, winter, tropical,
   lunar, Martian and deep-space maps.
-- **Economy** — hunt deer, boar and mammoth, forage berries, farm, cut wood, quarry stone, mine gold and,
-  from the Industrial Age, generate **energy**. Workers carry goods to drop-off buildings; techs improve
+- **Six map types** — inland, coastal, riverland, lakes, desert and highland. They change the terrain, the
+  farm yield (desert 60 %, riverland 115 %) and the tech tree (irrigation, qanats, fishing nets, navigation,
+  steam ships, deep mining, terrace farming, caravans).
+- **Naval play** on coastal, riverland and lakes maps — docks, fish, fishing boats and a warship line from the
+  war canoe to the hover frigate; boats sail on water and fords only.
+- **Economy** — hunt deer, boar and mammoth, forage berries, farm, fish, cut wood, quarry stone, mine gold
+  and, from the Industrial Age, generate **energy**. Workers carry goods to drop-off buildings; techs improve
   gathering; houses limit population.
-- **Military** — four unit lines (infantry, ranged, mounted/armour/fighters, siege) with a counter system
-  (spear beats horse, horse beats archer, archer beats infantry, siege beats buildings), 60+ unit types
-  from clubmen and slingers to hover tanks, railgunners and dreadnoughts, area damage, minimum ranges,
-  towers and armed town centres, attack-move and formations.
-- **Technology** — 68 researchable technologies (tools, weapons, armour, construction per age) plus age
-  advancement at the town centre.
+- **Military** — four land unit lines (infantry, ranged, mounted/armour/fighters, siege) plus warships, with a
+  counter system (spear beats horse, horse beats archer, archer beats infantry, siege beats buildings),
+  60+ land unit types from clubmen and slingers to hover tanks, railgunners and dreadnoughts, area damage,
+  minimum ranges, towers and armed town centres, attack-move and formations.
+- **Technology** — 68 researchable technologies (tools, weapons, armour, construction per age), 8
+  map-specific technologies, plus age advancement at the town centre.
 - **Modes** — single player vs computer, multiplayer player-vs-player, and mixed teams of players and AI
-  (up to 8 slots, free team assignment, easy/normal/hard AI).
+  (up to 8 slots, free team assignment). **Six AI levels**: super easy, easy, normal, hard, super hard and
+  insane.
+- **Save and resume** — registered players save running matches on the server and resume them later; other
+  human seats are reserved for their players or taken over by the computer.
+- **Demo mode** — an idle menu turns into a self-playing AI showcase with an automatic camera; any input
+  returns to the menu.
 - **Back-end** — accounts (or guest play), lobby with live room list and online players, high scores per
   level, leaderboard, campaign progress, reconnect to running games.
+- **Accounts and administration** — open, approval-only or closed registration, optional guest play,
+  **TOTP two-factor sign-in** (any authenticator app), and an **admin page** to approve, block, delete and
+  reset accounts, require MFA, kick players, watch games and read the audit log.
+- **Diagnostics** — `/healthz`, `/readyz`, JSON statistics and a **Prometheus** `/metrics` endpoint (tick and
+  HTTP latency histograms, WebSocket traffic, logins, games, cheat flags, Go runtime).
+- **Anti-cheat** — HMAC-signed, sequenced commands, client integrity report, server-side detection of
+  map-hack symptoms, unit spoofing and inhuman action rates; flagged players are warned, removed and reported.
 - **Chat** — global broadcast chat in the lobby, private whispers (`/w name text`), room chat and
   team-only chat in game (Enter to talk, Tab to switch channel).
-- **Level editor** — paint terrain, place resources and animals, set start positions, ages, objective,
-  theme and starting resources; generate random maps, open campaign maps as templates, save to the
+- **Level editor** — paint terrain, place resources, fish and animals, set start positions, ages, objective,
+  map type, theme and starting resources; generate random maps, open campaign maps as templates, save to the
   server, download/upload JSON and play-test instantly.
 - **Graphics** — isometric renderer with a per-pixel terrain shader (blended tiles, noise texturing,
   shore depth), animated water, rocks, procedurally drawn buildings for ten architectural eras, walking/
@@ -45,9 +62,9 @@ effect and piece of music is generated procedurally at runtime.
 - **Sound** — Web Audio synthesised effects (axes, pickaxes, hammers, clashing steel, arrows, muskets,
   cannon, lasers, plasma, explosions, horns) with stereo panning, and generative background music whose
   mode, tempo and instruments change with the age.
-- **Security** — strict CSP, CSRF protection, Argon2id, rate limiting, fog-filtered snapshots (no map
-  hacks), server-authoritative commands, plus an OS sandbox with **seccomp-BPF, Landlock, capability
-  dropping, no_new_privs**, a hardened **systemd** unit and an **SELinux** policy module.
+- **Security** — strict CSP, CSRF protection, Argon2id, TOTP MFA, audit log, rate limiting, fog-filtered
+  snapshots (no map hacks), server-authoritative commands, plus an OS sandbox with **seccomp-BPF, Landlock,
+  capability dropping, no_new_privs**, a hardened **systemd** unit and an **SELinux** policy module.
 
 ## Screenshots
 
@@ -86,10 +103,53 @@ The back-end listens on `127.0.0.1:8080` by default. Any of these select another
 | flag | `lotl-server -port 9000` |
 | full address | `lotl-server -listen 0.0.0.0:9000` |
 | environment | `LOTL_PORT=9000 lotl-server` |
+| config file | `server: {port: 9000}` in the YAML file |
 | systemd socket | edit `ListenStream=` in `deploy/systemd/lotl.socket` |
 
-Other flags: `-data DIR`, `-tls-cert/-tls-key` (HTTPS), `-secure-cookies`, `-trust-proxy`,
+Other flags: `-config FILE`, `-data DIR`, `-tls-cert/-tls-key` (HTTPS), `-secure-cookies`, `-trust-proxy`,
 `-allow-origin host,...`, `-max-rooms N`, `-log-level`, `-no-sandbox` (debugging only).
+
+### Configuration file
+
+All settings — including account policy, anti-cheat, demo mode, save limits and metrics access — live in a
+YAML file; [deploy/config/lotl.yaml](deploy/config/lotl.yaml) lists every key with its default.
+
+```bash
+./bin/lotl-server -config deploy/config/lotl.yaml      # or LOTL_CONFIG=/etc/lotl/lotl.yaml
+```
+
+Precedence: **flag > `LOTL_*` environment > config file > built-in default**. Unknown keys and out-of-range
+values stop the server with an error. The file is read once at start-up, before the sandbox is applied.
+
+### Administration
+
+```yaml
+accounts:
+  registration: approval     # open | approval | closed
+  allowGuests: false
+  bootstrapAdmin: admin      # created on first start
+  requireAdminMFA: true
+```
+
+```bash
+LOTL_ADMIN_PASSWORD='a long passphrase' ./bin/lotl-server -config lotl.yaml
+```
+
+Sign in as `admin`, enrol an authenticator app when asked, then open **Administration** in the main menu
+(`/admin.html`): players (approve, block, role, require/reset MFA, password reset, delete, clear cheat flags,
+notes), running games, health & performance and the audit log. See [docs/operations.md](docs/operations.md).
+
+### Diagnostics
+
+| Endpoint | Access | Content |
+|---|---|---|
+| `GET /healthz` | public | `ok` |
+| `GET /readyz` | public | 200 if the data directory is writable, else 503 |
+| `GET /api/health` | public | status, version, uptime |
+| `GET /api/stats` | token / admin / loopback | JSON statistics |
+| `GET /metrics` | token / admin / loopback | Prometheus text format |
+
+Set `metrics.token` (≥ 16 characters) and scrape with `Authorization: Bearer <token>`.
 
 ## How to play
 
@@ -118,22 +178,24 @@ make race          # race detector on the server
 make long          # hour-long AI-vs-AI matches across ages
 ```
 
-Current coverage: **93 %** of statements across all packages (`make cover`).
+Current coverage: **92.4 %** of statements across all packages (`make cover`).
 
 Fuzz targets: `FuzzParseClientMsg`, `FuzzHTTPAPI` (server), `FuzzLevelJSON`, `FuzzApply`, `FuzzFog`,
-`FuzzCleanText` (game), `FuzzOpenCorruptFiles`, `FuzzValidName` (store).
+`FuzzCleanText`, `FuzzLoadGame` (game), `FuzzOpenCorruptFiles`, `FuzzValidName` (store).
 
 ### Layout
 
 ```
-cmd/lotl-server     entry point, flags, TLS, socket activation, sandbox start-up
-internal/game       simulation: ages, units, techs, economy, combat, A*, fog, AI, map generator
+cmd/lotl-server     entry point, flags, config loading, TLS, socket activation, sandbox start-up
+internal/config     YAML configuration: defaults, loading, validation
+internal/game       simulation: ages, units, techs, economy, combat, naval, A*, fog, AI, map generator, save/load
 internal/levels     the 17-level campaign and skirmish maps
-internal/server     HTTP API, sessions, CSRF, rate limits, WebSocket hub, lobby, rooms, chat
-internal/store      accounts (Argon2id), scores, custom levels — atomic JSON files
+internal/server     HTTP API, sessions, MFA, admin API, metrics, anti-cheat, WebSocket hub, lobby, rooms, demo, chat
+internal/store      accounts (Argon2id, roles, MFA), scores, custom levels, saved games, audit log — atomic JSON files
+internal/totp       RFC 6238 one-time passwords
 internal/hardening  no_new_privs, capabilities, Landlock, seccomp-BPF
-web/                browser client (embedded): renderer, sprites, audio, HUD, editor
-deploy/             systemd units, SELinux policy, seccomp notes, Dockerfile, install script
+web/                browser client (embedded): renderer, sprites, audio, HUD, editor, admin page, integrity
+deploy/             systemd units, example config, SELinux policy, seccomp notes, install script
 docs/               architecture, design, ADRs, ASRs, API, security, tests, operations
 ```
 

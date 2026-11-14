@@ -12,7 +12,8 @@ playtesting require a registered account** (guests can still download).
 │ Terrain    │                                  │ Level properties │
 │ Objects    │       isometric map view         │ name, theme,     │
 │ Tools      │                                  │ ages, objective, │
-│ Brush      │                                  │ AI, resources    │
+│ Brush      │                                  │ map type, AI,    │
+│            │                                  │ resources        │
 └────────────┴──────────────────────────────────┴──────────────────┘
 ```
 
@@ -20,8 +21,8 @@ playtesting require a registered account** (guests can still download).
 
 | Palette | Entries | Notes |
 |---|---|---|
-| **Terrain** | Grass, Dirt, Sand, Water, Mountain, Ford, Road | Water and Mountain are impassable and remove objects they cover; Ford is passable but slower; colours follow the selected theme |
-| **Objects** | tree, berry, gold, stone, crystal, deer, boar, mammoth | not placeable on water or mountains; with a brush larger than 1×1 objects are scattered (trees ≈ 70 % fill, others ≈ 35 %) |
+| **Terrain** | Grass, Dirt, Sand, Water, Mountain, Ford, Road | Water and Mountain are impassable for land units; painting Water removes land objects, painting Mountain removes every object, painting land removes fish; Ford is passable (also for boats) but slower; colours follow the selected theme |
+| **Objects** | tree, berry, gold, stone, crystal, fish, deer, boar, mammoth | **fish only on water**, everything else not on water or mountains; with a brush larger than 1×1 objects are scattered (trees ≈ 70 % fill, others ≈ 35 %) |
 | **Tools** | erase, start | *erase* removes objects under the brush; *start* toggles a player start position: click to add, click within 2 tiles of an existing start to remove (2–8 starts) |
 | **Brush** | 1×1, 3×3, 5×5, 9×9 | applies to terrain, objects and erase; a preview outline follows the cursor |
 | **Grid** | checkbox | tile grid overlay |
@@ -45,7 +46,8 @@ playtesting require a registered account** (guests can still download).
 | Theme | temperate, desert, winter, tropical, moon, mars, space |
 | Start age / Final age | any of the 17 ages; final ≥ start |
 | Objective | Conquest; Survive (minutes 1–120); Advance first (needs final > start) |
-| AI difficulty | easy, normal, hard (default for quick play on this level) |
+| Map type | inland, coastal, riverland, lakes, desert, highland — selects farm yield and map-specific technologies; boats need an earthly theme, a non-desert type and ≥ 2 % water |
+| AI difficulty | super easy, easy, normal, hard, super hard, insane (default for quick play on this level) |
 | Starting resources | food/wood/stone/gold/energy, 0–100 000 each; all zero = the game's defaults for the start age |
 
 Below the fields the editor shows the map size, object and player counts
@@ -57,7 +59,7 @@ by the server.
 | Button | Effect |
 |---|---|
 | **New** | dialog for width, height (24–128) and theme; starts with plain grass and two starts in opposite corners |
-| **Generate** | replaces the map with a procedurally generated one (`POST /api/generate`) using the current theme, width, ages and number of starts (min 2) and a random seed; name, description and id are kept |
+| **Generate** | replaces the map with a procedurally generated one (`POST /api/generate`) using the current theme, width, ages and number of starts (min 2) and a random seed; name, description and id are kept. The editor does not send the map type, so the result is an **inland** map and the map type resets to inland — set it again afterwards (and add fish/water by hand) |
 | **Open…** | opens a campaign level (as a copy, " (copy)" appended) or a player level; levels by other authors open as copies, your own levels open for editing |
 | **Save to server** | validates, then `POST /api/levels`; first save assigns an id, later saves update your level |
 | **Playtest** | saves, then starts a quick game on it (`/?play=<id>`) |
@@ -83,8 +85,9 @@ A level file is the JSON form of `game.Level`:
   "objective": {"type": "conquest"},
   "startRes": [200, 200, 150, 0, 0],
   "difficulty": "normal",
+  "mapType": "coastal",
   "tiles": "0000…(4096 digits)…0000",
-  "objects": [{"k": "tree", "x": 10, "y": 12}, {"k": "gold", "x": 20, "y": 8}],
+  "objects": [{"k": "tree", "x": 10, "y": 12}, {"k": "gold", "x": 20, "y": 8}, {"k": "fish", "x": 40, "y": 3}],
   "starts": [{"x": 8, "y": 8}, {"x": 55, "y": 55}]
 }
 ```
@@ -101,10 +104,11 @@ A level file is the JSON form of `game.Level`:
 | `objective.type` | string | – | `conquest` (default), `survive`, `advance` |
 | `objective.minutes` | number | survive | duration to hold out |
 | `startRes` | 5 numbers | – | `[food, wood, stone, gold, energy]` |
-| `difficulty` | string | – | `easy`, `normal` (default), `hard` |
+| `difficulty` | string | – | `super_easy`, `easy`, `normal` (default), `hard`, `super_hard`, `insane` |
+| `mapType` | string | – | `inland` (default), `coastal`, `riverland`, `lakes`, `desert`, `highland` |
 | `opponents` | int | – | AI count for quick play; default `maxPlayers − 1` |
 | `tiles` | string | yes | `width × height` characters, row-major (index `y·width + x`) |
-| `objects` | array | – | `k` kind, `x`, `y` tile coordinates |
+| `objects` | array | – | `k` kind (`tree`, `berry`, `gold`, `stone`, `crystal`, `fish`, `deer`, `boar`, `mammoth`), `x`, `y` tile coordinates |
 | `starts` | array | yes | player start tiles (town centre centre) |
 | `maxPlayers` | int | – | derived from `starts` by the server |
 
@@ -137,9 +141,10 @@ load of the server's data files:
 | Ages | 0 ≤ startAge ≤ maxAge ≤ 16 | `invalid age range` |
 | Objective | `conquest`, `survive` (1–120 min), `advance` (maxAge > startAge) | `survive objective needs 1..120 minutes`, `advance objective needs maxAge > startAge`, `unknown objective "…"` |
 | Start resources | each 0 … 100 000, not NaN | `invalid start resource N` |
-| Difficulty | `easy`, `normal`, `hard` (empty → normal) | `invalid difficulty` |
+| Difficulty | one of the 6 levels (empty → normal) | `invalid difficulty` |
+| Map type | one of the 6 map types (empty → inland) | `unknown map type "…"` |
 | Tiles | length = width × height; characters `0`–`6` | `tiles length does not match dimensions`, `invalid tile at N` |
-| Objects | ≤ 6 000; known kind; inside the map | `too many objects`, `unknown object kind "…"`, `object out of bounds` |
+| Objects | ≤ 6 000; known kind; inside the map (the server does not check the terrain under an object; the editor keeps fish on water) | `too many objects`, `unknown object kind "…"`, `object out of bounds` |
 | Starts | 2 … 8; at least 2 tiles from every edge; on passable terrain | `level needs 2..8 start positions`, `start position too close to edge`, `start position on impassable terrain` |
 | Opponents | 0 … maxPlayers−1 (otherwise reset to maxPlayers−1) | – |
 
@@ -158,7 +163,12 @@ request body ≤ 1 MiB. Only the author can overwrite or delete a level.
   (food early), 4+ gold and stone tiles, trees, and crystals if the level
   reaches the Industrial Age (energy).
 - Space themes (`moon`, `mars`, `space`) look best with crystals instead of
-  animals; the generator omits animals there.
+  animals; the generator omits animals there. They never have boats.
+- For naval maps choose `coastal`, `riverland` or `lakes`, give every start
+  a stretch of shore (a dock needs two water tiles along its edge) and a
+  few fish within reach. Fish are only harvestable by fishing boats.
+- `desert` maps cut farm yield to 60 % but unlock Irrigation and Qanats;
+  `highland` unlocks Terrace Farming and Deep Mining.
 - Use **Survive** for defensive scenarios: the human side wins when the
   timer runs out, and AI opponents are allied against the player in quick
   play.

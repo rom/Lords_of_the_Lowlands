@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rom/lords_of_the_lowlands/internal/config"
 	"github.com/rom/lords_of_the_lowlands/internal/hardening"
 	"github.com/rom/lords_of_the_lowlands/internal/server"
 	"github.com/rom/lords_of_the_lowlands/internal/store"
@@ -37,28 +38,81 @@ type options struct {
 	noSandbox     bool
 	logLevel      string
 	maxRooms      int
+	cfg           *config.Config
 }
 
+// parseFlags reads the YAML configuration (-config or LOTL_CONFIG) and
+// applies command-line flags and LOTL_* environment variables on top:
+// flag > environment > config file > built-in default.
 func parseFlags(args []string) (*options, error) {
 	fs := flag.NewFlagSet("lotl-server", flag.ContinueOnError)
 	o := &options{}
-	fs.StringVar(&o.listen, "listen", envOr("LOTL_LISTEN", "127.0.0.1:8080"), "listen address host:port")
-	fs.IntVar(&o.port, "port", envInt("LOTL_PORT", 0), "TCP port (overrides the port of -listen)")
-	fs.StringVar(&o.dataDir, "data", envOr("LOTL_DATA", "./data"), "data directory (accounts, scores, levels)")
-	fs.StringVar(&o.tlsCert, "tls-cert", os.Getenv("LOTL_TLS_CERT"), "TLS certificate file (enables HTTPS)")
-	fs.StringVar(&o.tlsKey, "tls-key", os.Getenv("LOTL_TLS_KEY"), "TLS private key file")
+	cfgPath := fs.String("config", os.Getenv("LOTL_CONFIG"), "YAML configuration file")
+	fs.StringVar(&o.listen, "listen", "", "listen address host:port")
+	fs.IntVar(&o.port, "port", 0, "TCP port (overrides the port of -listen)")
+	fs.StringVar(&o.dataDir, "data", "", "data directory (accounts, scores, levels, saves)")
+	fs.StringVar(&o.tlsCert, "tls-cert", "", "TLS certificate file (enables HTTPS)")
+	fs.StringVar(&o.tlsKey, "tls-key", "", "TLS private key file")
 	fs.BoolVar(&o.secureCookies, "secure-cookies", false, "mark cookies Secure and send HSTS (implied by TLS)")
 	fs.BoolVar(&o.trustProxy, "trust-proxy", false, "trust X-Forwarded-For from a reverse proxy")
 	fs.StringVar(&o.origins, "allow-origin", "", "comma-separated extra allowed Origin hosts")
 	fs.BoolVar(&o.noSandbox, "no-sandbox", false, "disable Landlock/seccomp/capability hardening (debug only)")
-	fs.StringVar(&o.logLevel, "log-level", "info", "log level: debug, info, warn, error")
-	fs.IntVar(&o.maxRooms, "max-rooms", 200, "maximum concurrent rooms")
+	fs.StringVar(&o.logLevel, "log-level", "", "log level: debug, info, warn, error")
+	fs.IntVar(&o.maxRooms, "max-rooms", 0, "maximum concurrent rooms")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
-	if o.port < 0 || o.port > 65535 {
-		return nil, errors.New("port must be 0..65535")
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return nil, err
 	}
+	sv := &cfg.Server
+	str := func(flagName, env string, dst *string, from string) {
+		switch {
+		case set[flagName]:
+			*dst = from
+		case os.Getenv(env) != "":
+			*dst = os.Getenv(env)
+		}
+	}
+	str("listen", "LOTL_LISTEN", &sv.Listen, o.listen)
+	str("data", "LOTL_DATA", &cfg.Data.Dir, o.dataDir)
+	str("tls-cert", "LOTL_TLS_CERT", &sv.TLSCert, o.tlsCert)
+	str("tls-key", "LOTL_TLS_KEY", &sv.TLSKey, o.tlsKey)
+	str("log-level", "LOTL_LOG_LEVEL", &sv.LogLevel, o.logLevel)
+	if set["port"] {
+		sv.Port = o.port
+	} else if v, err := strconv.Atoi(os.Getenv("LOTL_PORT")); err == nil {
+		sv.Port = v
+	}
+	if set["secure-cookies"] {
+		sv.SecureCookies = o.secureCookies
+	}
+	if set["trust-proxy"] {
+		sv.TrustProxy = o.trustProxy
+	}
+	if set["allow-origin"] {
+		sv.AllowedOrigins = nil
+		for _, x := range strings.Split(o.origins, ",") {
+			if x = strings.TrimSpace(x); x != "" {
+				sv.AllowedOrigins = append(sv.AllowedOrigins, x)
+			}
+		}
+	}
+	if set["max-rooms"] {
+		sv.MaxRooms = o.maxRooms
+	}
+	if set["no-sandbox"] {
+		cfg.Security.Sandbox = !o.noSandbox
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	o.listen, o.port, o.dataDir, o.tlsCert, o.tlsKey = sv.Listen, sv.Port, cfg.Data.Dir, sv.TLSCert, sv.TLSKey
+	o.secureCookies, o.trustProxy, o.noSandbox, o.logLevel, o.maxRooms = sv.SecureCookies, sv.TrustProxy, !cfg.Security.Sandbox, sv.LogLevel, sv.MaxRooms
+	o.origins = strings.Join(sv.AllowedOrigins, ",")
 	if o.port > 0 {
 		host, _, err := net.SplitHostPort(o.listen)
 		if err != nil {
@@ -66,24 +120,8 @@ func parseFlags(args []string) (*options, error) {
 		}
 		o.listen = net.JoinHostPort(host, strconv.Itoa(o.port))
 	}
-	if (o.tlsCert == "") != (o.tlsKey == "") {
-		return nil, errors.New("both -tls-cert and -tls-key are required for TLS")
-	}
+	o.cfg = cfg
 	return o, nil
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(k string, def int) int {
-	if v, err := strconv.Atoi(os.Getenv(k)); err == nil {
-		return v
-	}
-	return def
 }
 
 // listener returns a systemd socket-activated listener if present,
@@ -162,7 +200,7 @@ func run(ctx context.Context, args []string, ready func(addr string)) error {
 		}
 	}
 	srv, err := server.New(server.Config{Static: web.FS(), Store: st, Logger: log, SecureCookies: o.secureCookies,
-		TrustProxy: o.trustProxy, AllowedOrigins: origins, MaxRooms: o.maxRooms})
+		TrustProxy: o.trustProxy, AllowedOrigins: origins, MaxRooms: o.maxRooms, Settings: o.cfg})
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestEmbeddedFiles(t *testing.T) {
-	for _, f := range []string{"index.html", "editor.html", "css/style.css", "css/editor.css", "js/main.js", "js/game.js", "js/render.js", "js/sprites.js", "js/audio.js", "js/editor.js", "js/net.js", "js/util.js"} {
+	for _, f := range []string{"index.html", "editor.html", "admin.html", "css/admin.css", "js/admin.js", "js/integrity.js", "css/style.css", "css/editor.css", "js/main.js", "js/game.js", "js/render.js", "js/sprites.js", "js/audio.js", "js/editor.js", "js/net.js", "js/util.js"} {
 		b, err := fs.ReadFile(FS(), f)
 		if err != nil || len(b) == 0 {
 			t.Fatalf("%s missing", f)
