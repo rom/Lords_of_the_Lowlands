@@ -1,6 +1,9 @@
 package game
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func navalGame(t *testing.T, mapType string) *Game {
 	t.Helper()
@@ -102,10 +105,34 @@ func TestMapTechs(t *testing.T) {
 	if err := g.Apply(Command{Player: 0, Type: CmdBuild, IDs: ids(ws), X: 3, Y: 11, What: "dock"}); err != ErrPlacement {
 		t.Fatal("dock without water")
 	}
+	ship := g.spawnUnit("bireme", 0, 16, 16)
+	soldier := g.spawnUnit("clubman", 0, 17, 17.5)
+	foe := g.spawnUnit("clubman", 1, 17, 17)
+	foe.MaxHP, foe.HP = 1e6, 1e6
+	shot := func(u *Entity) float64 {
+		u.Cooldown = 0
+		n := len(g.hits)
+		g.attackStep(u, foe, false)
+		if len(g.hits) != n+1 {
+			t.Fatal(u.Type, "did not fire")
+		}
+		return g.hits[n].dmg
+	}
+	shipBefore, soldierBefore := shot(ship), shot(soldier)
+	hpBefore := ship.MaxHP
 	g.applyTech(p, "navigation")
 	g.applyTech(p, "fishing_nets")
 	if p.navalMul <= 1 || p.fishMul <= 1 {
 		t.Fatal("naval techs")
+	}
+	if got := shot(ship); math.Abs(got-shipBefore*1.2) > 1e-9 {
+		t.Fatalf("warship attack %.3f -> %.3f after navigation, want x1.2", shipBefore, got)
+	}
+	if ship.MaxHP <= hpBefore {
+		t.Fatal("warship hit points not raised by navigation")
+	}
+	if got := shot(soldier); got != soldierBefore {
+		t.Fatalf("navigation changed land attack %.3f -> %.3f", soldierBefore, got)
 	}
 	if Counter(ClassNaval, ClassBuilding) <= 1 || Counter(ClassNaval, ClassFisher) <= 1 {
 		t.Fatal("naval counters")
@@ -176,5 +203,25 @@ func TestPlayerFishing(t *testing.T) {
 	g.smart(boats[1], tc, CmdSmart)
 	if boats[1].Order != OMove {
 		t.Fatal("boat on land target moves")
+	}
+}
+
+func TestAIDefendFlag(t *testing.T) {
+	for _, diff := range Difficulties {
+		g := newGame(t, flatLevel(), true)
+		p := g.Players[1]
+		p.ai = newAI(diff)
+		tc := own(g, 1, "town_center")[0]
+		guard := g.spawnUnit("clubman", 1, tc.X+3, tc.Y)
+		raider := g.spawnUnit("clubman", 0, tc.X-3, tc.Y)
+		p.Visible[int(raider.Y)*g.W+int(raider.X)] = true
+		p.ai.military(g, p, p.ai.survey(g, p))
+		defended := guard.Order == OAttack && guard.Target == raider.ID
+		if defended != p.ai.prof.Defend {
+			t.Fatalf("%s: defended=%v, profile Defend=%v", diff, defended, p.ai.prof.Defend)
+		}
+		if diff == "super_easy" && defended {
+			t.Fatal("super_easy should not defend")
+		}
 	}
 }
