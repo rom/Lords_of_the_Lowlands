@@ -32,7 +32,7 @@ flowchart LR
 1. `Tick++`, rebuild the spatial hash (`buildGrid`: 4×4-tile cells of units and buildings).
 2. AI players think once per second: `(Tick + index*3) % 10 == 0` (staggered).
 3. Every live entity in creation order (`g.order`): `stepUnit` or `stepBuilding`.
-4. `separate()` — push overlapping ground units apart (0.45 tiles, 0.7 if either has pop > 1; busy units are not pushed).
+4. `separate()` — soft collision: push overlapping ground units apart (0.45 tiles, 0.7 if either has pop > 1). Busy (working) units are never pushed; units walking along a path are never pushed either and pass through other walkers and busy units, while units standing in their way step aside. This keeps workers flowing in narrow lanes between trees and around crowded drop-offs (before, two workers meeting head-on shoved each other back indefinitely). A gather order remembers the resource kind, so a worker whose tree is felled by someone else moves on to the next tree of that kind; a worker that cannot reach its drop-off stops but keeps its load.
 5. `resolveHits()` — apply damage whose impact tick has arrived.
 6. Every 2nd tick: `updateVisibility()`.
 7. Every 10th tick: recompute population of every player and `checkVictory()`.

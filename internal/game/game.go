@@ -960,9 +960,8 @@ func (g *Game) approach(u, t *Entity) {
 				return
 			}
 		}
-		if u.Carry > 0 && t.Kind == KBuilding && t.Owner == u.Owner && len(t.B.Dropoff) > 0 {
-			u.Carry = 0 // cannot deliver; drop the load
-		}
+		// cannot get there: stop, but keep whatever we carry (a new
+		// gather order delivers it first)
 		g.setIdle(u)
 		return
 	}
@@ -1513,8 +1512,14 @@ func (g *Game) afterBuild(u *Entity, t *Entity) {
 	g.setIdle(u)
 }
 
-// separate pushes overlapping ground units apart.
+// separate pushes overlapping ground units apart (soft collision). Units
+// walking along a path are never pushed back: two workers meeting head-on in
+// a lane between trees, or passing a crowd of workers chopping at a camp,
+// slip past each other instead of shoving each other back forever. Units
+// standing around make room for them and spread out; working (busy) units
+// stay where they are.
 func (g *Game) separate() {
+	moving := func(e *Entity) bool { return len(e.Path) > 0 && !e.Busy }
 	for _, cell := range g.grid {
 		for i := 0; i < len(cell); i++ {
 			a := g.Ents[cell[i]]
@@ -1532,19 +1537,27 @@ func (g *Game) separate() {
 				if a.U.Pop > 1 || b.U.Pop > 1 {
 					min = 0.7
 				}
+				if moving(a) && moving(b) || moving(a) && b.Busy || moving(b) && a.Busy {
+					continue // walkers pass each other and anyone at work
+				}
 				if d < min && d > 1e-4 {
 					push := (min - d) / 2 * 0.5
+					// a walker is not pushed; the unit standing in its way
+					// steps aside by the whole amount
+					if moving(a) || moving(b) {
+						push *= 2
+					}
 					ax, ay := a.X-dx/d*push, a.Y-dy/d*push
 					bx, by := b.X+dx/d*push, b.Y+dy/d*push
 					g.navalCtx = a.U.Naval
 					if a.U.Flying || g.walkable(int(ax), int(ay)) {
-						if !a.Busy {
+						if !a.Busy && !moving(a) {
 							a.X, a.Y = ax, ay
 						}
 					}
 					g.navalCtx = b.U.Naval
 					if b.U.Flying || g.walkable(int(bx), int(by)) {
-						if !b.Busy {
+						if !b.Busy && !moving(b) {
 							b.X, b.Y = bx, by
 						}
 					}

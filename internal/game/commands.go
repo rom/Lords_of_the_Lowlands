@@ -409,6 +409,10 @@ func (g *Game) orderGather(u *Entity, t *Entity) {
 		u.lastRes = "carcass"
 	} else {
 		u.Order = OGather
+		// Remember what we were sent for: if the target is used up before we
+		// gather from it (another worker felled the tree), we look for the
+		// next one of the same kind instead of going idle.
+		u.lastRes = t.Type
 	}
 	u.Target = t.ID
 	u.Path = nil
