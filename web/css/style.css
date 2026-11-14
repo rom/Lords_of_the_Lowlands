@@ -188,3 +188,22 @@ input.short { width: 90px; }
 @keyframes pulse { 50% { opacity: 0.55; } }
 #game.spectator #bottombar, #game.spectator #resbar, #game.spectator #menubtn, #game.spectator #chatbox { display: none; }
 #game.spectator .minibox-spec { position: absolute; right: 12px; bottom: 12px; width: 220px; height: 220px; }
+
+/* settings opened from inside a game: above the game layer */
+#screens.ingame { z-index: 55; background: rgba(5,4,3,0.82); justify-content: center; }
+#screens.ingame .logo { display: none; }
+
+/* in-game help (? / F1) and dialogs */
+#helpbtn { min-width: 30px; font-weight: bold; margin-left: auto; margin-right: 6px; }
+.help-box { width: min(980px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 18px 22px; }
+.help-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.help-head h2 { margin: 0; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 6px 22px; margin-top: 8px; }
+.help-grid h3 { margin: 10px 0 4px; color: var(--gold); font-size: 15px; border-bottom: 1px solid var(--gold-dim); padding-bottom: 3px; }
+.help-grid table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.help-grid td { padding: 3px 4px; vertical-align: top; }
+.help-grid td:first-child { width: 44%; padding-right: 10px; }
+kbd { display: inline-block; margin: 0 3px 2px 0; padding: 1px 6px; border: 1px solid var(--gold-dim); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.dialog p { margin: 0; color: var(--ink-dim); }
+.dialog input { width: 100%; }
+.dialog .row { display: flex; gap: 10px; justify-content: flex-end; }

@@ -2,12 +2,64 @@
 import { el, $, clamp, lerp, fmtTime, TEAM, TEAM_NAMES, iso } from './util.js';
 import { Renderer } from './render.js';
 import { iconCanvas, techIcon, cmdIcon, resIcon, romanNum, RES_COLORS } from './sprites.js';
-import { sfx, playMusic } from './audio.js';
+import { sfx, playMusic, audioSettings, saveAudio } from './audio.js';
+
+// hkName renders a hotkey for display.
+function hkName(k) { return k === 'delete' ? 'Del' : k === 'escape' ? 'Esc' : k.toUpperCase(); }
 
 const RES_SHORT = ['Food', 'Wood', 'Stone', 'Gold', 'Energy'];
 const ECO = ['house', 'granary', 'lumber_camp', 'mining_camp', 'farm', 'dock', 'town_center', 'generator'];
 const MIL = ['barracks', 'range', 'stable', 'workshop', 'academy', 'tower'];
 const KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
+// Direct build hotkeys (Shift + letter) while workers are selected.
+const BUILD_KEYS = { e: 'house', g: 'granary', l: 'lumber_camp', n: 'mining_camp', f: 'farm', d: 'dock', c: 'town_center', p: 'generator',
+  b: 'barracks', r: 'range', s: 'stable', k: 'workshop', y: 'academy', t: 'tower' };
+
+// Every shortcut, grouped for the help screen (? / F1).
+export const SHORTCUTS = [
+  ['General', [
+    ['? / F1', 'Show or hide this help'],
+    ['F10', 'Game menu'],
+    ['Esc', 'Cancel placement / back / close window / clear selection'],
+    ['Enter', 'Open chat (Tab switches All / Team / Global)'],
+    ['Ctrl+S', 'Quick save (registered players)'],
+    ['Shift+M', 'Mute / unmute sound'],
+  ]],
+  ['Camera', [
+    ['Arrow keys / screen edge', 'Scroll the map'],
+    ['Mouse wheel  or  + / −', 'Zoom in / out'],
+    ['0', 'Reset zoom'],
+    ['Space', 'Jump to the latest attack alert'],
+    ['Backspace', 'Centre on the selection'],
+    ['Minimap click / drag', 'Move the camera (right-click: move units)'],
+  ]],
+  ['Selection', [
+    ['Click / drag', 'Select (Shift adds or removes)'],
+    ['Double-click', 'Select all visible units of that type'],
+    ['H', 'Select & centre on the town centre (Shift+H cycles)'],
+    ['.', 'Next idle worker (Ctrl+. selects all idle workers)'],
+    [',', 'Next idle military unit (Ctrl+, selects all)'],
+    ['M', 'Select all military units'],
+    ['Ctrl+A', 'Select all your units'],
+    ['Ctrl+1…9', 'Store selection as group'],
+    ['Shift+1…9', 'Add selection to group'],
+    ['1…9', 'Recall group (twice: centre on it)'],
+  ]],
+  ['Orders', [
+    ['Right-click', 'Move / gather / attack / build / repair; set rally point'],
+    ['A', 'Attack-move'],
+    ['S', 'Stop'],
+    ['Del', 'Delete selection (buildings ask first)'],
+    ['Q W E R T …', 'Command buttons in panel order (shown on each button)'],
+    ['Shift + train key', 'Train 5 at once'],
+  ]],
+  ['Building (workers selected)', [
+    ['Q / W', 'Economy / military build page'],
+    ['Shift+E  G  L  N  F  D  C  P', 'House, granary, lumber camp, mining camp, farm, dock, town centre, generator'],
+    ['Shift+B  R  S  K  Y  T', 'Barracks, range, stable, workshop, academy, tower'],
+    ['Shift+click when placing', 'Place several'],
+  ]],
+];
 
 export class GameClient {
   constructor(app, start) {
@@ -162,6 +214,7 @@ export class GameClient {
       el('p', { text: won ? 'Your people will remember this day.' : 'Your civilisation has fallen.' }),
       tbl,
       el('button', { class: 'btn', text: 'Return to Menu', onclick: () => this.app.leaveGame() }));
+    this.hideTip(); this.modal = 'end';
     $('#overlay').replaceChildren(box);
     $('#overlay').classList.remove('hidden');
   }
@@ -233,6 +286,7 @@ export class GameClient {
     }
     if (key === this.cmdKey && !this.menuDirty) return;
     this.cmdKey = key; this.menuDirty = false;
+    this.hideTip();
     this.cmdEl.replaceChildren(...this.commandButtons(s));
   }
 
@@ -276,16 +330,26 @@ export class GameClient {
 
   button(icon, title, tipLines, onclick, opts = {}) {
     const b = el('button', { class: 'cmd' + (opts.disabled ? ' disabled' : '') + (opts.poor ? ' poor' : '') }, icon);
-    if (opts.key) b.append(el('span', { class: 'hk', text: opts.key.toUpperCase() }));
-    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (opts.disabled) { sfx('error'); return; } sfx('click'); onclick(ev); });
-    b.addEventListener('mouseenter', () => this.showTip(title, tipLines, b));
-    b.addEventListener('mouseleave', () => this.tip.classList.add('hidden'));
+    if (opts.key) b.append(el('span', { class: 'hk', text: hkName(opts.key) }));
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); this.hideTip(); if (opts.disabled) { sfx('error'); return; } sfx('click'); onclick(ev); });
+    b.addEventListener('mouseenter', () => this.showTip(title, opts.key ? [...tipLines, `Hotkey: ${hkName(opts.key)}`] : tipLines, b));
+    b.addEventListener('mouseleave', () => this.hideTip());
     b.dataset.key = opts.key || '';
     return b;
   }
 
+  hideTip() { this.tipAnchor = null; this.tip.classList.add('hidden'); }
+
+  // Tooltips never outlive their button: the panel is rebuilt often, which
+  // removes the element without a mouseleave event.
+  tipWatchdog() {
+    if (!this.tipAnchor) return;
+    if (!this.tipAnchor.isConnected || !this.tipAnchor.matches(':hover') || !$('#overlay').classList.contains('hidden')) this.hideTip();
+  }
+
   showTip(title, lines, anchor) {
-    this.tip.replaceChildren(el('b', { text: title }), ...lines.map(l => el('div', { text: l })));
+    this.tipAnchor = anchor;
+    this.tip.replaceChildren(el('b', { text: title }), ...lines.filter(Boolean).map(l => el('div', { text: l })));
     this.tip.classList.remove('hidden');
     const r = anchor.getBoundingClientRect();
     this.tip.style.left = Math.max(8, Math.min(window.innerWidth - 280, r.left - 100)) + 'px';
@@ -366,7 +430,7 @@ export class GameClient {
         out.push(this.button(techIcon(t.kind, t.age), t.name, [`Cost: ${this.costText(t.cost)}`, t.desc, `Requires ${this.defs.ages[t.age].name}`], () => this.send({ c: 'research', t: b.i, w: t.id }), { key: key(), poor: !this.canAfford(t.cost) }));
       }
     }
-    out.push(this.button(cmdIcon('delete'), 'Delete Building', ['Destroys this building'], () => { if (confirm('Delete this building?')) this.send({ c: 'delete', ids: [b.i] }); }, { key: 'delete' }));
+    out.push(this.button(cmdIcon('delete'), 'Delete Building', ['Destroys this building'], () => this.ask('Delete building?', `${b.def.name} will be destroyed. This cannot be undone.`, 'Delete', () => this.send({ c: 'delete', ids: [b.i] }), { danger: true }), { key: 'delete' }));
     return out;
   }
 
@@ -436,6 +500,8 @@ export class GameClient {
     on(this.cv, 'mouseleave', () => { this.mouse.in = false; });
     on(window, 'keydown', (e) => this.keyDown(e));
     on(window, 'keyup', (e) => this.keys.delete(e.key.toLowerCase()));
+    on(window, 'blur', () => this.keys.clear());
+    on(window, 'mousedown', () => this.hideTip(), { capture: true });
     on(this.mini, 'mousedown', (e) => this.miniClick(e));
     on(this.mini, 'contextmenu', (e) => e.preventDefault());
     on(this.chatIn, 'keydown', (e) => {
@@ -448,22 +514,76 @@ export class GameClient {
       else if (e.key === 'Tab') { e.preventDefault(); this.chatCh = this.chatCh === 'room' ? 'team' : this.chatCh === 'team' ? 'global' : 'room'; $('#chatch').textContent = { room: 'All', team: 'Team', global: 'Global' }[this.chatCh]; }
     });
     on($('#menubtn'), 'click', () => this.gameMenu());
+    on($('#helpbtn'), 'click', () => this.helpOverlay());
   }
 
   gameMenu() {
     const box = el('div', { class: 'panel menu-box' },
       el('h2', { text: 'Game Menu' }),
-      el('button', { class: 'btn', text: 'Resume', onclick: () => $('#overlay').classList.add('hidden') }),
-      this.app.me && !this.app.me.guest ? el('button', { class: 'btn', text: 'Save Game', onclick: () => {
-        const name = prompt('Name this saved game:', `${this.level.name} — ${fmtTime(this.snap ? this.snap.time : 0)}`);
-        if (name !== null) { this.net.send({ t: 'save', name }); $('#overlay').classList.add('hidden'); }
-      } }) : null,
+      el('button', { class: 'btn', text: 'Resume', onclick: () => this.closeOverlay() }),
+      this.canSave() ? el('button', { class: 'btn', text: 'Save Game', onclick: () => this.saveDialog() }) : null,
+      el('button', { class: 'btn', text: 'Keyboard Shortcuts (?)', onclick: () => this.helpOverlay() }),
       el('button', { class: 'btn', text: 'Settings', onclick: () => this.app.showSettings() }),
-      el('button', { class: 'btn danger', text: 'Resign', onclick: () => { if (confirm('Resign this game?')) { this.send({ c: 'resign' }); $('#overlay').classList.add('hidden'); } } }),
-      el('button', { class: 'btn', text: 'Leave to Menu', onclick: () => this.app.leaveGame() }),
-      el('p', { class: 'keys', text: 'Keys: drag = select · right-click = command · A = attack-move · S = stop · H = town centre · . = idle worker · Ctrl+1-9 = groups · Enter = chat (Tab switches channel) · wheel = zoom · arrow keys or screen edge = scroll' }));
+      this.spectator ? null : el('button', { class: 'btn danger', text: 'Resign', onclick: () => this.ask('Resign?', 'You will lose this game.', 'Resign', () => this.send({ c: 'resign' }), { danger: true }) }),
+      el('button', { class: 'btn', text: 'Leave to Menu', onclick: () => this.app.leaveGame() }));
+    this.openOverlay(box, 'menu');
+  }
+
+  canSave() { return !this.spectator && this.app.me && !this.app.me.guest; }
+
+  openOverlay(box, kind) {
+    this.hideTip();
+    this.modal = kind;
+    this.keys.clear();
     $('#overlay').replaceChildren(box);
     $('#overlay').classList.remove('hidden');
+  }
+
+  closeOverlay() {
+    if (this.over) return;
+    this.modal = null;
+    $('#overlay').classList.add('hidden');
+    $('#overlay').replaceChildren();
+  }
+
+  overlayOpen() { return !$('#overlay').classList.contains('hidden'); }
+
+  // ask shows a small in-game confirmation (Enter = OK, Esc = cancel).
+  ask(title, text, okLabel, onOk, opts = {}) {
+    let input = null;
+    const ok = () => { const v = input ? input.value.trim() : null; this.closeOverlay(); onOk(v); };
+    if (opts.input !== undefined) {
+      input = el('input', { type: 'text', maxlength: '64', value: opts.input });
+      input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ok(); else if (e.key === 'Escape') this.closeOverlay(); });
+    }
+    const box = el('div', { class: 'panel menu-box dialog' },
+      el('h2', { text: title }), text ? el('p', { text }) : null, input,
+      el('div', { class: 'row' },
+        el('button', { class: 'btn' + (opts.danger ? ' danger' : ' primary'), text: okLabel, onclick: ok }),
+        el('button', { class: 'btn', text: 'Cancel', onclick: () => this.closeOverlay() })));
+    this.openOverlay(box, 'dialog');
+    this.modalOk = ok;
+    if (input) { input.focus(); input.select(); }
+  }
+
+  saveDialog(quick) {
+    if (!this.canSave()) { this.toast('Log in with an account to save games'); return; }
+    const name = `${this.level.name} — ${fmtTime(this.snap ? this.snap.time : 0)}`;
+    if (quick) { this.net.send({ t: 'save', name: 'Quick save: ' + name }); this.toast('Quick save…'); return; }
+    this.ask('Save game', 'Name this saved game:', 'Save', (v) => { if (v) this.net.send({ t: 'save', name: v }); }, { input: name });
+  }
+
+  helpOverlay() {
+    if (this.over) return;
+    if (this.modal === 'help') { this.closeOverlay(); return; }
+    const cols = SHORTCUTS.map(([group, rows]) => el('section', {},
+      el('h3', { text: group }),
+      el('table', {}, ...rows.map(([k, d]) => el('tr', {}, el('td', {}, ...k.split('  ').map(p => el('kbd', { text: p }))), el('td', { text: d }))))));
+    const box = el('div', { class: 'panel help-box' },
+      el('div', { class: 'help-head' }, el('h2', { text: 'Keyboard Shortcuts' }), el('button', { class: 'btn small', text: 'Close (Esc)', onclick: () => this.closeOverlay() })),
+      el('div', { class: 'help-grid' }, ...cols),
+      el('p', { class: 'keys', text: 'Tip: every command button shows its hotkey in the corner; hover a button for details.' }));
+    this.openOverlay(box, 'help');
   }
 
   pick(sx, sy) {
@@ -609,19 +729,56 @@ export class GameClient {
   }
 
   keyDown(e) {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
+    if (!$('#screens').classList.contains('hidden')) return; // settings shown over the game
     const k = e.key.toLowerCase();
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (k === '?' || k === 'f1' || (k === '/' && e.shiftKey)) { e.preventDefault(); this.helpOverlay(); return; }
+    // while a window is open only its own keys work
+    if (this.overlayOpen()) {
+      if (k === 'escape' || (k === 'f10' && this.modal === 'menu')) { e.preventDefault(); this.closeOverlay(); }
+      else if (k === 'enter' && this.modal === 'dialog' && this.modalOk) { e.preventDefault(); this.modalOk(); }
+      return;
+    }
     this.keys.add(k);
     if (k === 'enter') { $('#chatbox').classList.add('open'); this.chatIn.focus(); e.preventDefault(); return; }
     if (k === 'escape') {
       if (this.placing || this.amoveMode) { this.placing = null; this.amoveMode = false; return; }
       if (this.menuPage !== 'main') { this.menuPage = 'main'; this.menuDirty = true; return; }
-      if (!$('#overlay').classList.contains('hidden') && !this.over) { $('#overlay').classList.add('hidden'); return; }
       this.sel.clear(); this.hudDirty = true; return;
     }
     if (k === 'f10') { e.preventDefault(); this.gameMenu(); return; }
+    if (ctrl && k === 's') { e.preventDefault(); this.saveDialog(true); return; }
+    if (ctrl && k === 'a') { e.preventDefault(); this.selectWhere(x => x.k === 0); return; }
+    if (e.shiftKey && k === 'm') { const a = audioSettings(); a.muted = !a.muted; saveAudio(); this.toast(a.muted ? 'Sound muted' : 'Sound on'); return; }
+    if (k === '+' || k === '=') { this.r.setZoom(this.r.zoom * 1.15); return; }
+    if (k === '-' || k === '_') { this.r.setZoom(this.r.zoom / 1.15); return; }
+    if (k === '0' && !ctrl) { this.r.setZoom(1); return; }
+    if (k === ' ') {
+      e.preventDefault();
+      const a = this.alertAt;
+      if (a) this.r.centerOn(a.x, a.y); else this.toast('No recent alerts');
+      return;
+    }
+    if (k === 'backspace') {
+      e.preventDefault();
+      const s = this.selected();
+      if (s.length) this.r.centerOn(s.reduce((t, x) => t + x.x, 0) / s.length, s.reduce((t, x) => t + x.y, 0) / s.length);
+      return;
+    }
+    if (this.spectator) return;
+    if (e.shiftKey && BUILD_KEYS[k] && this.selected().some(x => x.o === this.you && x.k === 0 && x.def.class === 'worker')) {
+      const id = BUILD_KEYS[k], d = this.defs.buildings[id];
+      if (!d || d.age > this.map.maxAge || (id === 'dock' && !this.map.naval)) { sfx('error'); return; }
+      if (d.age > this.age) { sfx('error'); this.toast(`Requires ${this.defs.ages[d.age].name}`); return; }
+      e.preventDefault(); this.startPlacing(id); return;
+    }
+    if (/^[1-9]$/.test(k) || (e.shiftKey && /^Digit[1-9]$/.test(e.code))) {
+      const n = e.code && e.code.startsWith('Digit') ? e.code.slice(5) : k;
+      if (ctrl) { e.preventDefault(); this.groups[n] = [...this.sel]; this.toast(`Group ${n} set`); return; }
+      if (e.shiftKey) { this.groups[n] = [...new Set([...(this.groups[n] || []), ...this.sel])]; this.toast(`Added to group ${n}`); return; }
+    }
     if (/^[1-9]$/.test(k)) {
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.groups[k] = [...this.sel]; this.toast(`Group ${k} set`); return; }
       const g = (this.groups[k] || []).filter(id => this.ents.has(id));
       if (g.length) {
         const now = performance.now();
@@ -631,17 +788,32 @@ export class GameClient {
       }
       return;
     }
-    if (k === 'h') { const tc = [...this.ents.values()].find(x => x.o === this.you && x.t === 'town_center'); if (tc) { this.sel = new Set([tc.i]); this.r.centerOn(tc.x, tc.y); this.hudDirty = true; } return; }
-    if (k === '.') {
-      const idle = [...this.ents.values()].filter(x => x.o === this.you && x.k === 0 && x.def.class === 'worker' && x.s === 0);
-      if (idle.length) { this.idleIdx = ((this.idleIdx || 0) + 1) % idle.length; const w = idle[this.idleIdx]; this.sel = new Set([w.i]); this.r.centerOn(w.x, w.y); this.hudDirty = true; }
-      else this.toast('No idle workers');
+    if (k === 'h') {
+      const tcs = [...this.ents.values()].filter(x => x.o === this.you && x.t === 'town_center');
+      if (tcs.length) { this.tcIdx = e.shiftKey ? ((this.tcIdx || 0) + 1) % tcs.length : 0; const tc = tcs[this.tcIdx]; this.sel = new Set([tc.i]); this.r.centerOn(tc.x, tc.y); this.hudDirty = true; this.menuPage = 'main'; }
       return;
     }
-    // command hotkeys
-    for (const b of this.cmdEl.querySelectorAll('button.cmd')) {
-      if (b.dataset.key && b.dataset.key === k) { b.click(); e.preventDefault(); return; }
+    if (k === '.' || k === ',') {
+      const worker = k === '.';
+      const idle = [...this.ents.values()].filter(x => x.o === this.you && x.k === 0 && x.s === 0 && (x.def.class === 'worker') === worker);
+      if (!idle.length) { this.toast(worker ? 'No idle workers' : 'No idle military units'); return; }
+      if (ctrl) { e.preventDefault(); this.sel = new Set(idle.map(x => x.i)); }
+      else { this.idleIdx = ((this.idleIdx || 0) + 1) % idle.length; const w = idle[this.idleIdx]; this.sel = new Set([w.i]); this.r.centerOn(w.x, w.y); }
+      this.menuPage = 'main'; this.hudDirty = true;
+      return;
     }
+    if (k === 'm' && !ctrl) { this.selectWhere(x => x.k === 0 && x.def.class !== 'worker'); return; }
+    if (ctrl) return; // leave browser shortcuts alone
+    // command hotkeys (Shift is passed on: Shift+train key trains 5)
+    for (const b of this.cmdEl.querySelectorAll('button.cmd')) {
+      if (b.dataset.key && b.dataset.key === k) { b.dispatchEvent(new MouseEvent('click', { shiftKey: e.shiftKey, bubbles: true })); e.preventDefault(); return; }
+    }
+  }
+
+  selectWhere(f) {
+    const ids = [...this.ents.values()].filter(x => x.o === this.you && f(x)).map(x => x.i);
+    if (!ids.length) { this.toast('Nothing to select'); return; }
+    this.sel = new Set(ids); this.menuPage = 'main'; this.hudDirty = true;
   }
 
   // --------------------------------------------------------- frame
@@ -663,6 +835,7 @@ export class GameClient {
     this.raf = requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.1, (ts - this.lastFrame) / 1000);
     this.lastFrame = ts;
+    this.tipWatchdog();
     // camera scrolling
     const sp = 900 * dt;
     let dx = 0, dy = 0;

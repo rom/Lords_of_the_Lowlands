@@ -118,7 +118,7 @@ class App {
     $('#startbtn').addEventListener('click', () => this.net.send({ t: 'start' }));
     $('#leaveroom').addEventListener('click', () => { this.net.send({ t: 'leave' }); this.room = null; this.show('lobby'); });
     $('#scorelevel').addEventListener('change', () => this.loadScores());
-    $('#settingsback').addEventListener('click', () => { if (this.game) { $('#overlay').classList.add('hidden'); this.show('none'); $('#screens').classList.add('hidden'); } else this.show('menu'); });
+    $('#settingsback').addEventListener('click', () => this.closeSettings());
     for (const id of ['vmaster', 'vsfx', 'vmusic']) $('#' + id).addEventListener('input', (e) => { audioSettings()[id.slice(1)] = e.target.value / 100; saveAudio(); });
     $('#vmute').addEventListener('change', (e) => { audioSettings().muted = e.target.checked; saveAudio(); });
     window.addEventListener('resize', () => { if (this.bg) this.bg.resize(); });
@@ -361,10 +361,17 @@ class App {
     this.backdrop();
   }
 
+  // Settings opened from inside a game are shown above the game layer.
   showSettings() {
     $('#overlay').classList.add('hidden');
     $('#screens').classList.remove('hidden');
+    $('#screens').classList.toggle('ingame', !!this.game);
     this.show('settings');
+  }
+
+  closeSettings() {
+    $('#screens').classList.remove('ingame');
+    if (this.game) { $('#screens').classList.add('hidden'); this.screen = 'game'; } else this.show('menu');
   }
 
   loadSettings() {

@@ -499,15 +499,22 @@ top 25 scores of each level.
 
 ## Controls (summary)
 
+The complete list lives in one table (`SHORTCUTS` in `web/js/game.js`) and is shown in game with `?` / `F1`.
+
 | Input | Action |
 |---|---|
 | Left click / drag | select / box-select |
 | Right click | context command: move, attack, gather, build/repair, set rally point (buildings) |
-| Attack-move button / key | move and fight anything on the way |
-| Ctrl + 0–9, 0–9 | set / recall control groups |
-| H / . | select town centre / next idle worker |
-| Esc | cancel placement or attack-move |
-| Shift-click train | queue five |
-| Arrow keys, screen edges, minimap | scroll camera; wheel zooms |
+| A / S / Del | attack-move / stop / delete (buildings confirm in an in-game dialog) |
+| Q W E R T … | command buttons in panel order; Shift + train key queues five |
+| Shift + E G L N F D C P B R S K Y T | place a building directly while workers are selected |
+| Ctrl+1–9, Shift+1–9, 1–9 | set / add to / recall control groups |
+| H (Shift+H) / . / , | town centre (cycle) / next idle worker / next idle soldier; Ctrl selects all idle |
+| M / Ctrl+A | all military / all units |
+| Esc | cancel placement or attack-move, back, close window, clear selection |
+| Arrow keys, screen edges, minimap | scroll camera; wheel or + / − zooms, 0 resets |
+| Space / Backspace | jump to last attack alert / centre on selection |
 | Enter / Tab | open chat / switch channel (All, Team, Global) |
-| F10 | game menu (resign) |
+| F10 / Ctrl+S / Shift+M / ? or F1 | game menu / quick save / mute / shortcut help |
+
+Editor: 1–7 terrain, Shift+1–9 objects, E eraser, P start position, [ ] brush size, G grid, N new, Ctrl+Z undo, Ctrl+S save, ? help.

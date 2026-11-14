@@ -157,16 +157,21 @@ Set `metrics.token` (≥ 16 characters) and scrape with `Authorization: Bearer <
 
 ## How to play
 
+Press **`?`** (or `F1`, or the **?** button) in a game for the full shortcut sheet; the level editor has its own (`?` there too).
+
 | Action | Control |
 |---|---|
 | Select / box select | left click / drag (Shift adds, double-click selects all of a type) |
 | Move, gather, build, attack, repair | right click (context-sensitive) |
-| Attack-move / stop / delete | `A` + click / `S` / `Del` |
-| Build menu & production | buttons bottom right (hotkeys `Q W E R T …`) |
-| Town centre / idle worker | `H` / `.` |
-| Control groups | `Ctrl+1…9`, recall `1…9` (double tap to centre) |
-| Camera | arrow keys, screen edge, minimap, mouse wheel to zoom |
+| Attack-move / stop / delete | `A` + click / `S` / `Del` (buildings ask for confirmation) |
+| Build menu & production | buttons bottom right (hotkeys `Q W E R T …`, shown on each button; `Shift` + train key = 5) |
+| Build directly (workers selected) | `Shift+E` house, `G` granary, `L` lumber camp, `N` mining camp, `F` farm, `D` dock, `C` town centre, `P` generator, `B` barracks, `R` range, `S` stable, `K` workshop, `Y` academy, `T` tower |
+| Town centre / idle worker / idle soldier | `H` (`Shift+H` cycles) / `.` / `,` (`Ctrl` selects all idle) |
+| Select all military / all units | `M` / `Ctrl+A` |
+| Control groups | `Ctrl+1…9` set, `Shift+1…9` add, `1…9` recall (double tap to centre) |
+| Camera | arrow keys, screen edge, minimap, wheel or `+`/`-` to zoom, `0` reset, `Space` last alert, `Backspace` selection |
 | Chat | `Enter`, `Tab` switches All / Team / Global |
+| Menu / quick save / mute / help | `F10` / `Ctrl+S` / `Shift+M` / `?` |
 
 Gather food and wood early, build houses before you are housed, add drop-off camps near resources,
 research at the academy, and save up to **advance the age** at the town centre — every age unlocks
