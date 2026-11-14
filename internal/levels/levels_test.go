@@ -50,7 +50,7 @@ func TestSkirmish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.Width != 72 || l.MaxPlayers != 2 || l.MaxAge != 5 || l.Gen.Water != 0.3 {
+	if l.Width != 112 || l.MaxPlayers != 2 || l.MaxAge != 5 || l.Gen.Water != 0.3 {
 		t.Fatalf("defaults %+v", l)
 	}
 	if _, err := Skirmish(SkirmishOptions{Theme: "lava"}); err == nil {

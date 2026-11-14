@@ -147,7 +147,10 @@ export class GameClient {
       e.prog = e.p || 0;
       e.hp = e.h;
     }
-    for (const id of [...this.ents.keys()]) if (!seen.has(id)) { this.ents.delete(id); this.sel.delete(id); }
+    // Keyframes list everything; deltas leave out unchanged resources, which
+    // stay until a keyframe drops them or the server reports them used up.
+    for (const [id, e] of this.ents) if (!seen.has(id) && (s.key || e.k !== 2)) { this.ents.delete(id); this.sel.delete(id); }
+    for (const id of s.gone || []) { this.ents.delete(id); this.sel.delete(id); }
     if (s.fog) {
       const n = this.map.w * this.map.h;
       const out = new Uint8Array(n);

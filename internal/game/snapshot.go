@@ -42,14 +42,19 @@ type PlayerView struct {
 
 // Snapshot is the per-player state broadcast every tick.
 type Snapshot struct {
-	Tick    int          `json:"tick"`
-	You     int          `json:"you"`
-	Res     [NumRes]int  `json:"res"`
-	Pop     int          `json:"pop"`
-	PopCap  int          `json:"cap"`
-	Age     int          `json:"age"`
-	Techs   []string     `json:"techs"`
-	Ents    []EntView    `json:"ents"`
+	Tick   int         `json:"tick"`
+	You    int         `json:"you"`
+	Res    [NumRes]int `json:"res"`
+	Pop    int         `json:"pop"`
+	PopCap int         `json:"cap"`
+	Age    int         `json:"age"`
+	Techs  []string    `json:"techs"`
+	Ents   []EntView   `json:"ents"`
+	// Key marks a keyframe: Ents is complete. In a delta (Key false) resources
+	// are only listed when they are in sight or changed this tick, and Gone lists
+	// resources that were used up; everything else in Ents is still complete.
+	Key     bool         `json:"key,omitempty"`
+	Gone    []int        `json:"gone,omitempty"`
 	Events  []Event      `json:"ev,omitempty"`
 	Fog     string       `json:"fog,omitempty"`
 	Players []PlayerView `json:"players"`
@@ -64,7 +69,15 @@ func r2(v float64) float64 { return math.Round(v*100) / 100 }
 // when currently visible, enemy buildings and resources once explored.
 // Passing player == -1 yields a spectator view of everything.
 func (g *Game) Snapshot(player int, events []Event, withFog bool) *Snapshot {
-	s := &Snapshot{Tick: g.Tick, You: player, Over: g.Over, Winner: g.Winner, Time: r2(float64(g.Tick) / TickRate)}
+	return g.SnapshotDelta(player, events, withFog, true)
+}
+
+// SnapshotDelta is Snapshot with optional resource delta encoding. Trees,
+// mines and bushes make up most of a map's entities but rarely change, so
+// between keyframes only the resources touched this tick are sent. This keeps
+// snapshots small on large, well-explored maps.
+func (g *Game) SnapshotDelta(player int, events []Event, withFog, key bool) *Snapshot {
+	s := &Snapshot{Tick: g.Tick, You: player, Over: g.Over, Winner: g.Winner, Time: r2(float64(g.Tick) / TickRate), Key: key}
 	var p *Player
 	if player >= 0 {
 		p = g.Players[player]
@@ -83,6 +96,13 @@ func (g *Game) Snapshot(player int, events []Event, withFog bool) *Snapshot {
 		e := g.Ents[id]
 		if e == nil || e.dead {
 			continue
+		}
+		if !key && e.Kind == KResource && e.chg != g.Tick {
+			// unchanged resource: the client already has it, unless it has
+			// just come into sight (resources in view are always sent)
+			if i := int(e.Y)*g.W + int(e.X); p == nil || i < 0 || i >= len(p.Visible) || !p.Visible[i] {
+				continue
+			}
 		}
 		if p != nil && !g.canSee(player, e) {
 			continue
@@ -129,6 +149,9 @@ func (g *Game) Snapshot(player int, events []Event, withFog bool) *Snapshot {
 			}
 			s.Events = append(s.Events, ev)
 		}
+	}
+	if !key {
+		s.Gone = append(s.Gone, g.gone...)
 	}
 	if withFog && p != nil {
 		s.Fog = EncodeFog(p.Visible, p.Explored)

@@ -140,7 +140,7 @@ func demoLevel(rng *rand.Rand) (*game.Level, int) {
 	}
 	mt := game.MapTypes[rng.Intn(len(game.MapTypes))]
 	n := 2 + rng.Intn(3)
-	l, err := levels.Skirmish(levels.SkirmishOptions{Theme: theme, Size: 56 + 8*rng.Intn(4), StartAge: start,
+	l, err := levels.Skirmish(levels.SkirmishOptions{Theme: theme, Size: 96 + 16*rng.Intn(4), StartAge: start,
 		MaxAge: minInt(start+2, game.MaxAge), Seed: rng.Int63(), Water: 0.3, Players: n, MapType: mt})
 	if err != nil {
 		return demoLevel(rng)

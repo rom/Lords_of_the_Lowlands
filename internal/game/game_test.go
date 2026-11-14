@@ -933,3 +933,64 @@ func TestAIRebalanceAllSlots(t *testing.T) {
 	}
 	t.Fatal("AI in slot 1 never moved a worker off its over-stocked wood")
 }
+
+func TestSnapshotDeltaResources(t *testing.T) {
+	g := newGame(t, flatLevel(Object{"tree", 8, 8}, Object{"gold", 20, 20}, Object{"tree", 30, 30}, Object{"berry", 9, 12}), false)
+	steps(g, 2)
+	count := func(s *Snapshot) (n int) {
+		for _, v := range s.Ents {
+			if v.Kind == KResource {
+				n++
+			}
+		}
+		return
+	}
+	key := g.SnapshotDelta(-1, nil, false, true)
+	if !key.Key || count(key) == 0 {
+		t.Fatalf("keyframe must list resources: key=%v n=%d", key.Key, count(key))
+	}
+	delta := g.SnapshotDelta(-1, nil, false, false)
+	if delta.Key || count(delta) >= count(key) {
+		t.Fatalf("delta should omit unchanged resources: %d of %d", count(delta), count(key))
+	}
+	// a resource that changes this tick is included; one used up is reported gone
+	var r *Entity
+	for _, id := range g.order {
+		if e := g.Ents[id]; e != nil && !e.dead && e.Kind == KResource {
+			r = e
+			break
+		}
+	}
+	g.Tick++
+	g.gone = g.gone[:0]
+	r.chg = g.Tick
+	found := false
+	for _, v := range g.SnapshotDelta(-1, nil, false, false).Ents {
+		found = found || v.ID == r.ID
+	}
+	if !found {
+		t.Fatal("changed resource missing from delta")
+	}
+	g.remove(r)
+	d := g.SnapshotDelta(-1, nil, false, false)
+	if len(d.Gone) != 1 || d.Gone[0] != r.ID {
+		t.Fatalf("gone = %v, want [%d]", d.Gone, r.ID)
+	}
+	// players always get the resources in sight
+	p0 := g.SnapshotDelta(0, nil, false, false)
+	for _, v := range g.Snapshot(0, nil, false).Ents {
+		if v.Kind != KResource {
+			continue
+		}
+		e := g.Ents[v.ID]
+		if g.Players[0].Visible[int(e.Y)*g.W+int(e.X)] {
+			ok := false
+			for _, w := range p0.Ents {
+				ok = ok || w.ID == v.ID
+			}
+			if !ok {
+				t.Fatalf("visible resource %d missing from player delta", v.ID)
+			}
+		}
+	}
+}

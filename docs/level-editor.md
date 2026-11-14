@@ -58,13 +58,13 @@ by the server.
 
 | Button | Effect |
 |---|---|
-| **New** | dialog for width, height (24–128) and theme; starts with plain grass and two starts in opposite corners |
+| **New** | dialog for width, height (24–256, default 96) and theme; starts with plain grass and two starts in opposite corners |
 | **Generate** | replaces the map with a procedurally generated one (`POST /api/generate`) using the current theme, width, ages and number of starts (min 2) and a random seed; name, description and id are kept. The editor does not send the map type, so the result is an **inland** map and the map type resets to inland — set it again afterwards (and add fish/water by hand) |
 | **Open…** | opens a campaign level (as a copy, " (copy)" appended) or a player level; levels by other authors open as copies, your own levels open for editing |
 | **Save to server** | validates, then `POST /api/levels`; first save assigns an id, later saves update your level |
 | **Playtest** | saves, then starts a quick game on it (`/?play=<id>`) |
 | **Download** | saves the level as `<name>.json` locally |
-| **Upload** | loads a `.json` level file (≤ 512 KB): checks size, tiles alphabet, object kinds and bounds, clamps ages, defaults theme/objective, keeps ≤ 8 starts; the id is cleared so saving creates a new level |
+| **Upload** | loads a `.json` level file (≤ 1 MB): checks size, tiles alphabet, object kinds and bounds, clamps ages, defaults theme/objective, keeps ≤ 8 starts; the id is cleared so saving creates a new level |
 
 `/editor.html?level=<id>` opens a level directly.
 
@@ -137,14 +137,14 @@ load of the server's data files:
 | Name | required; cleaned; ≤ 48 runes | `level name required` |
 | Description, author | cleaned; ≤ 600 / 48 runes | (truncated) |
 | Theme | one of the 7 themes | `unknown theme "…"` |
-| Width, height | 24 … 128 | `map size must be between 24 and 128` |
+| Width, height | 24 … 256 | `map size must be between 24 and 256` |
 | Ages | 0 ≤ startAge ≤ maxAge ≤ 16 | `invalid age range` |
 | Objective | `conquest`, `survive` (1–120 min), `advance` (maxAge > startAge) | `survive objective needs 1..120 minutes`, `advance objective needs maxAge > startAge`, `unknown objective "…"` |
 | Start resources | each 0 … 100 000, not NaN | `invalid start resource N` |
 | Difficulty | one of the 6 levels (empty → normal) | `invalid difficulty` |
 | Map type | one of the 6 map types (empty → inland) | `unknown map type "…"` |
 | Tiles | length = width × height; characters `0`–`6` | `tiles length does not match dimensions`, `invalid tile at N` |
-| Objects | ≤ 6 000; known kind; inside the map (the server does not check the terrain under an object; the editor keeps fish on water) | `too many objects`, `unknown object kind "…"`, `object out of bounds` |
+| Objects | ≤ 20 000; known kind; inside the map (the server does not check the terrain under an object; the editor keeps fish on water) | `too many objects`, `unknown object kind "…"`, `object out of bounds` |
 | Starts | 2 … 8; at least 2 tiles from every edge; on passable terrain | `level needs 2..8 start positions`, `start position too close to edge`, `start position on impassable terrain` |
 | Opponents | 0 … maxPlayers−1 (otherwise reset to maxPlayers−1) | – |
 

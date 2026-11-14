@@ -385,23 +385,23 @@ difficulty in the campaign screen.
 
 | # | Level | Theme | Map type | Ages | Map | Objective | AI | Difficulty |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **The First Fire** | temperate | inland | Dawn Age → Neolithic Age | 56² | Conquest — defeat every opponent | 1 | easy |
-| 2 | **Valley of Plenty** | temperate | riverland | Neolithic Age → Copper Age | 60² | Advance — be first to reach the final age | 1 | easy |
-| 3 | **Gift of the River** | desert | riverland | Copper Age → Bronze Age | 64² | Conquest — defeat every opponent | 2 | easy |
-| 4 | **The Sea Peoples** | tropical | coastal | Bronze Age → Iron Age | 64² | Survive — hold out 15 min | 2 | normal |
-| 5 | **Iron and Ice** | winter | coastal | Iron Age → Classical Age | 68² | Conquest — defeat every opponent | 1 | normal |
-| 6 | **Phalanx** | desert | coastal | Classical Age → Early Middle Ages | 68² | Conquest — defeat every opponent | 1 | normal |
-| 7 | **Shield Wall** | temperate | riverland | Early Middle Ages → High Middle Ages | 72² | Conquest — defeat every opponent | 2 | normal |
-| 8 | **Lords of the Lowlands** | temperate | coastal | High Middle Ages → Renaissance | 76² | Conquest — defeat every opponent | 2 | normal |
-| 9 | **Pike and Shot** | temperate | inland | Renaissance → Imperial Age | 76² | Conquest — defeat every opponent | 1 | hard |
-| 10 | **A New World** | tropical | coastal | Imperial Age → Industrial Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 11 | **The Iron Horse** | temperate | inland | Industrial Age → Machine Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 12 | **No Man's Land** | winter | inland | Machine Age → Atomic Age | 80² | Survive — hold out 20 min | 2 | hard |
-| 13 | **Iron Curtain** | winter | lakes | Atomic Age → Information Age | 88² | Conquest — defeat every opponent | 3 | normal |
-| 14 | **Silicon Frontier** | desert | desert | Information Age → Orbital Age | 88² | Conquest — defeat every opponent | 2 | hard |
-| 15 | **Sea of Tranquility** | moon | inland | Orbital Age → Interplanetary Age | 84² | Conquest — defeat every opponent | 2 | hard |
-| 16 | **Red Planet** | mars | inland | Interplanetary Age → Interstellar Age | 92² | Conquest — defeat every opponent | 2 | hard |
-| 17 | **Battle for the Stars** | space | inland | Interstellar Age | 96² | Conquest — defeat every opponent | 3 | hard |
+| 1 | **The First Fire** | temperate | inland | Dawn Age → Neolithic Age | 84² | Conquest — defeat every opponent | 1 | easy |
+| 2 | **Valley of Plenty** | temperate | riverland | Neolithic Age → Copper Age | 88² | Advance — be first to reach the final age | 1 | easy |
+| 3 | **Gift of the River** | desert | riverland | Copper Age → Bronze Age | 96² | Conquest — defeat every opponent | 2 | easy |
+| 4 | **The Sea Peoples** | tropical | coastal | Bronze Age → Iron Age | 96² | Survive — hold out 15 min | 2 | normal |
+| 5 | **Iron and Ice** | winter | coastal | Iron Age → Classical Age | 104² | Conquest — defeat every opponent | 1 | normal |
+| 6 | **Phalanx** | desert | coastal | Classical Age → Early Middle Ages | 104² | Conquest — defeat every opponent | 1 | normal |
+| 7 | **Shield Wall** | temperate | riverland | Early Middle Ages → High Middle Ages | 108² | Conquest — defeat every opponent | 2 | normal |
+| 8 | **Lords of the Lowlands** | temperate | coastal | High Middle Ages → Renaissance | 112² | Conquest — defeat every opponent | 2 | normal |
+| 9 | **Pike and Shot** | temperate | inland | Renaissance → Imperial Age | 112² | Conquest — defeat every opponent | 1 | hard |
+| 10 | **A New World** | tropical | coastal | Imperial Age → Industrial Age | 120² | Conquest — defeat every opponent | 2 | normal |
+| 11 | **The Iron Horse** | temperate | inland | Industrial Age → Machine Age | 120² | Conquest — defeat every opponent | 2 | normal |
+| 12 | **No Man's Land** | winter | inland | Machine Age → Atomic Age | 120² | Survive — hold out 20 min | 2 | hard |
+| 13 | **Iron Curtain** | winter | lakes | Atomic Age → Information Age | 132² | Conquest — defeat every opponent | 3 | normal |
+| 14 | **Silicon Frontier** | desert | desert | Information Age → Orbital Age | 132² | Conquest — defeat every opponent | 2 | hard |
+| 15 | **Sea of Tranquility** | moon | inland | Orbital Age → Interplanetary Age | 128² | Conquest — defeat every opponent | 2 | hard |
+| 16 | **Red Planet** | mars | inland | Interplanetary Age → Interstellar Age | 136² | Conquest — defeat every opponent | 2 | hard |
+| 17 | **Battle for the Stars** | space | inland | Interstellar Age | 144² | Conquest — defeat every opponent | 3 | hard |
 
 1. **The First Fire** — 300,000 years ago a band huddles around the first fire. Hunt mammoth and deer, gather berries and drive the rival clan from the valley. Discover farming to enter the Neolithic.
 2. **Valley of Plenty** — The ice retreats and wild grain covers the valley. Be the first tribe to master copper and enter the Copper Age.

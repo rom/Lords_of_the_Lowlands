@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"github.com/rom/lords_of_the_lowlands/internal/game"
 	"net/http"
 	"sort"
 	"strings"
@@ -14,19 +15,23 @@ import (
 
 // Client is one connected WebSocket.
 type Client struct {
-	hub    *Hub
-	name   string
-	guest  bool
-	send   chan []byte
-	room   *Room
-	chatL  *Limiter
-	cmdL   *Limiter
-	closed chan struct{}
-	once   sync.Once
-	conn   *websocket.Conn
-	cheat  *cheatState
-	saveL  *Limiter
-	signed bool
+	// keyedFor is the game this client last received a snapshot keyframe
+	// for; a client new to a game always gets a keyframe first. Guarded by
+	// the room mutex.
+	keyedFor *game.Game
+	hub      *Hub
+	name     string
+	guest    bool
+	send     chan []byte
+	room     *Room
+	chatL    *Limiter
+	cmdL     *Limiter
+	closed   chan struct{}
+	once     sync.Once
+	conn     *websocket.Conn
+	cheat    *cheatState
+	saveL    *Limiter
+	signed   bool
 }
 
 func (c *Client) close() {

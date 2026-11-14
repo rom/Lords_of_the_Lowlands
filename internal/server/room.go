@@ -42,6 +42,10 @@ type Slot struct {
 }
 
 // Room is a lobby room that becomes a match.
+// keyframeTicks is how often (in ticks) a complete snapshot is sent; in
+// between, unchanged resources are left out (see game.SnapshotDelta).
+const keyframeTicks = 50
+
 type Room struct {
 	hub      *Hub
 	ID       string
@@ -614,16 +618,25 @@ func (r *Room) tick(cmds []game.Command) bool {
 	g.Step()
 	ev := g.Events()
 	fog := g.Tick%5 == 1
+	key := g.Tick%keyframeTicks == 1
 	for _, s := range r.Slots {
 		if s.client == nil || s.Kind != SlotHuman {
 			continue
 		}
-		snap := g.Snapshot(s.player, ev, fog)
+		k := key || s.client.keyedFor != g
+		s.client.keyedFor = g
+		snap := g.SnapshotDelta(s.player, ev, fog, k)
 		s.client.sendJSON(map[string]interface{}{"t": "snap", "s": snap}, true)
 		m.snapshots.Add(1)
 	}
 	if len(r.spectators) > 0 {
-		b, _ := json.Marshal(map[string]interface{}{"t": "snap", "s": g.Snapshot(-1, ev, false)})
+		k := key
+		for _, c := range r.spectators {
+			if c.keyedFor != g {
+				k, c.keyedFor = true, g
+			}
+		}
+		b, _ := json.Marshal(map[string]interface{}{"t": "snap", "s": g.SnapshotDelta(-1, ev, false, k)})
 		for _, c := range r.spectators {
 			c.enqueue(b, true)
 			m.snapshots.Add(1)

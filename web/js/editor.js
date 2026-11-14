@@ -7,7 +7,7 @@ import { theme, iconCanvas, resourceSprite } from './sprites.js';
 const TERRAIN = ['Grass', 'Dirt', 'Sand', 'Water', 'Mountain', 'Ford', 'Road'];
 const OBJECTS = ['tree', 'berry', 'gold', 'stone', 'crystal', 'fish', 'deer', 'boar', 'mammoth'];
 const THEMES = ['temperate', 'desert', 'winter', 'tropical', 'moon', 'mars', 'space'];
-const MIN = 24, MAX = 128;
+const MIN = 24, MAX = 256;
 
 class Editor {
   constructor() {
@@ -27,7 +27,7 @@ class Editor {
     this.bindInput();
     await this.listLevels();
     const q = new URLSearchParams(location.search).get('level');
-    if (q) await this.open(q); else this.newLevel(64, 64, 'temperate');
+    if (q) await this.open(q); else this.newLevel(96, 96, 'temperate');
     this.loop();
   }
 
@@ -86,7 +86,7 @@ class Editor {
     }
     if (l.maxAge < l.startAge) return 'Final age must not be before start age';
     if (l.objective.type === 'advance' && l.maxAge === l.startAge) return 'Advance objective needs a later final age';
-    if (this.objects.size > 6000) return 'Too many objects (max 6000)';
+    if (this.objects.size > 20000) return 'Too many objects (max 20000)';
     return '';
   }
 
@@ -193,11 +193,11 @@ class Editor {
   }
 
   newDialog() {
-    const w = el('input', { type: 'number', min: MIN, max: MAX, value: 64 }), h = el('input', { type: 'number', min: MIN, max: MAX, value: 64 });
+    const w = el('input', { type: 'number', min: MIN, max: MAX, value: 96 }), h = el('input', { type: 'number', min: MIN, max: MAX, value: 96 });
     const th = el('select', {}, ...THEMES.map(t => el('option', { value: t, text: t })));
     const box = el('div', { class: 'panel menu-box' }, el('h2', { text: 'New Level' }),
       el('label', {}, 'Width ', w), el('label', {}, 'Height ', h), el('label', {}, 'Theme ', th),
-      el('button', { class: 'btn primary', text: 'Create', onclick: () => { this.newLevel(clamp(+w.value || 64, MIN, MAX), clamp(+h.value || 64, MIN, MAX), th.value); $('#overlay').classList.add('hidden'); } }),
+      el('button', { class: 'btn primary', text: 'Create', onclick: () => { this.newLevel(clamp(+w.value || 96, MIN, MAX), clamp(+h.value || 96, MIN, MAX), th.value); $('#overlay').classList.add('hidden'); } }),
       el('button', { class: 'btn', text: 'Cancel', onclick: () => $('#overlay').classList.add('hidden') }));
     $('#overlay').replaceChildren(box); $('#overlay').classList.remove('hidden');
   }
@@ -232,7 +232,7 @@ class Editor {
 
   async upload(f) {
     if (!f) return;
-    if (f.size > 512 * 1024) { this.status('File too large'); return; }
+    if (f.size > 1024 * 1024) { this.status('File too large'); return; }
     try {
       const l = JSON.parse(await f.text());
       if (typeof l.width !== 'number' || typeof l.height !== 'number' || typeof l.tiles !== 'string' || l.tiles.length !== l.width * l.height || l.width < MIN || l.width > MAX || l.height < MIN || l.height > MAX) throw new Error('Not a valid level file');
