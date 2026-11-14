@@ -729,6 +729,11 @@ export function eaveShadow(ctx, f, depth = 0.16, a = 0.32) {
 // ------------------------------------------------------------ team colour
 export function teamCol(team) { return TEAM[team] || '#888'; }
 
+// Flags: while a capture list is set (buildingSprite with live=true), flag()
+// draws only the pole and records the cloth so it can wave live
+// (drawFlagCloth, every frame) instead of being baked into the sprite.
+let FLAGS = null;
+export function flagCapture(list) { FLAGS = list; }
 export function flag(ctx, x, y, z, h, team, t = 0, opt = {}) {
   const [bx, by] = P(x, y, z);
   const top = by - h * ZH;
@@ -736,17 +741,31 @@ export function flag(ctx, x, y, z, h, team, t = 0, opt = {}) {
   ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, top); ctx.stroke();
   ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(bx - 0.4, by); ctx.lineTo(bx - 0.4, top); ctx.stroke();
   ctx.fillStyle = opt.finial || '#d8b450'; ctx.beginPath(); ctx.arc(bx, top - 1, 1.4, 0, 7); ctx.fill();
-  const tc = TEAM[team] || '#888', L = opt.len || 13;
-  const w = Math.sin(t * 4 + x * 3) * 1.6, w2 = Math.cos(t * 4 + x * 3) * 1.2;
+  ctx.fillStyle = 'rgba(255,255,240,0.6)'; ctx.beginPath(); ctx.arc(bx - 0.5, top - 1.5, 0.5, 0, 7); ctx.fill();
+  const L = opt.len || 13, ph = x * 3 + y * 1.7;
+  if (FLAGS) { FLAGS.push([bx, top, L, team, ph]); return; }
+  drawFlagCloth(ctx, bx, top, L, team, t, ph);
+}
+
+// a waving pennant hanging from (bx, top): travelling wave along the cloth,
+// amplitude growing towards the free end, lit folds and a swallowtail
+export function drawFlagCloth(ctx, bx, top, L, team, t = 0, ph = 0) {
+  const tc = TEAM[team] || '#888', H = 8, N = 6;
+  const wv = (u) => Math.sin(u * 5.2 - t * 6 - ph) * (0.3 + u * 1.9) + Math.sin(u * 9 - t * 9.5 - ph * 1.3) * u * 0.5;
+  const xs = [], ys = [];
+  for (let i = 0; i <= N; i++) { const u = i / N; xs.push(bx + u * L * (1 - 0.05 * Math.abs(Math.sin(t * 3 + ph)))); ys.push(wv(u) + u * 0.9); }
   ctx.beginPath(); ctx.moveTo(bx, top);
-  ctx.bezierCurveTo(bx + L * 0.35, top - 1 + w, bx + L * 0.65, top + 2 - w, bx + L, top + 1 + w2);
-  ctx.lineTo(bx + L - 2, top + 4.5 + w2 * 0.6); ctx.lineTo(bx + L, top + 8 + w2);
-  ctx.bezierCurveTo(bx + L * 0.65, top + 9 - w, bx + L * 0.35, top + 7 + w, bx, top + 8);
+  for (let i = 1; i <= N; i++) ctx.lineTo(xs[i], top + ys[i]);
+  ctx.lineTo(xs[N] - 2.2, top + ys[N] + H * 0.55);
+  for (let i = N; i >= 0; i--) ctx.lineTo(xs[i], top + ys[i] + H - (i === N ? 0 : 0));
   ctx.closePath();
-  const g = ctx.createLinearGradient(bx, top, bx + L, top + 8);
-  g.addColorStop(0, shade(tc, 0.75)); g.addColorStop(0.4, shade(tc, 1.15)); g.addColorStop(0.7, shade(tc, 0.85)); g.addColorStop(1, shade(tc, 1.05));
+  const g = ctx.createLinearGradient(bx, 0, bx + L, 0);
+  for (let i = 0; i <= N; i++) { const sl = i < N ? ys[i + 1] - ys[i] : ys[i] - ys[i - 1]; g.addColorStop(i / N, shade(tc, Math.max(0.55, Math.min(1.3, 1.02 - sl * 0.32)))); }
   ctx.fillStyle = g; ctx.fill();
-  ctx.strokeStyle = shade(tc, 0.45); ctx.lineWidth = 0.5; ctx.stroke();
+  ctx.strokeStyle = shade(tc, 0.42); ctx.lineWidth = 0.5; ctx.stroke();
+  // hem stripe near the pole
+  ctx.strokeStyle = 'rgba(255,240,200,0.55)'; ctx.lineWidth = 0.7;
+  ctx.beginPath(); ctx.moveTo(xs[1] - 0.6, top + ys[1] + 0.6); ctx.lineTo(xs[1] - 0.6, top + ys[1] + H - 0.6); ctx.stroke();
 }
 
 // hanging banner on a wall face
