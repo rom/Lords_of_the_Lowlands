@@ -145,6 +145,7 @@ type Player struct {
 	hpMul      float64
 	ai         *AI
 	alertTick  int
+	seenB      map[int]bool // enemy buildings this player has actually seen
 }
 
 // PlayerSetup describes a slot when creating a game.

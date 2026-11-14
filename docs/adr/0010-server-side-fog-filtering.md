@@ -37,8 +37,8 @@ may know:
 - Map hacks are impossible: the data is not on the client.
 - Server CPU per snapshot grows with players × entities; vision updates are
   amortised (every 2nd tick, fog encoding every 5th).
-- Explored enemy buildings are currently reported with their *live* state
-  instead of a per-player "last seen" memory, leaking some information
-  (new or destroyed buildings in explored-but-dark areas). Closing this needs
-  per-player memory of building snapshots.
+- Enemy buildings are only revealed once seen (per-player memory of seen
+  building IDs), so new buildings in explored-but-dark areas stay hidden.
+  Remembered buildings are still reported with their *live* state (HP,
+  destruction); a full fix would store per-player building snapshots.
 - Spectator views are supported by `Snapshot(-1, …)`.

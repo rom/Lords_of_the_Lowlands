@@ -81,8 +81,20 @@ func (g *Game) canSee(player int, e *Entity) bool {
 		return false
 	}
 	p := g.Players[player]
-	if e.Kind == KResource || e.Kind == KBuilding {
+	if e.Kind == KResource {
 		return p.Explored[i]
+	}
+	if e.Kind == KBuilding {
+		// enemy buildings are only known once actually seen, so new
+		// construction in old territory stays hidden until scouted
+		if p.Visible[i] {
+			if p.seenB == nil {
+				p.seenB = map[int]bool{}
+			}
+			p.seenB[e.ID] = true
+			return true
+		}
+		return p.seenB[e.ID]
 	}
 	return p.Visible[i]
 }

@@ -12,7 +12,7 @@ client. Routes are registered in `Server.routes()`
 | Format | JSON (`application/json; charset=utf-8`), `Cache-Control: no-store` on API responses |
 | Errors | `{"error": "<message>"}` with a 4xx/5xx status |
 | Authentication | session cookie `lotl_session` (32 random bytes, base64url, 43 chars), `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age=604800` (7 days), `Secure` when TLS or `-secure-cookies` |
-| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most **1 MiB** (`http.MaxBytesReader`); exactly one JSON value; **unknown fields are rejected** (`DisallowUnknownFields`) → **400** `invalid JSON body` |
+| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most **1 MiB** (`http.MaxBytesReader`; **512 KiB** for `POST /api/levels`); exactly one JSON value; **unknown fields are rejected** (`DisallowUnknownFields`) → **400** `invalid JSON body` |
 | CSRF | non-GET `/api/*` requests must carry an `Origin` (or `Referer`) whose host equals the request `Host` or one of `-allow-origin`; requests without either header are accepted only if `Sec-Fetch-Site` is absent or `same-origin` → else **403** `cross-origin request refused` |
 | Rate limits | all `/api/*`: 20 requests/s per client IP, burst 60 → **429** `rate limit exceeded`; `register`/`login` additionally 1 per 5 s, burst 8 → **429** `too many attempts, try later` |
 | Client IP | `RemoteAddr`; the last `X-Forwarded-For` entry only with `-trust-proxy` |

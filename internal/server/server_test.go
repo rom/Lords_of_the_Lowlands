@@ -375,6 +375,9 @@ func TestLevelsAPI(t *testing.T) {
 	if code, _, _ := a.do("POST", "/api/levels", `{"name":""}`, nil); code != 400 {
 		t.Fatal("invalid level")
 	}
+	if code, _, _ := a.do("POST", "/api/levels", `{"name":"`+strings.Repeat("x", 600*1024)+`"}`, nil); code != 400 {
+		t.Fatal("oversized level")
+	}
 	if code, _, _ := a.do("POST", "/api/levels", `nope`, nil); code != 400 {
 		t.Fatal("bad json level")
 	}

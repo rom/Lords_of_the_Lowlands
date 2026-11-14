@@ -266,7 +266,7 @@ Every second (`think`) it runs four planners:
 | research | advance the age when it has ≥ `10 + age` workers and can pay; otherwise academy techs in the order gather → attack → armor → hp, keeping half the next age cost in reserve |
 | military | trains the best unit at every military building (≤ 2 queued), saving for the next age once a minimum army exists; defends against visible enemies within 14 tiles of its town centre; after minute 4, when the army reaches the attack size (+ age/2), it stages at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; when the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2 |
 
-¹ Because `think` runs on the staggered ticks `(Tick + 3·index) % 10 == 0`, the `Tick % 50 == 0` rebalance currently only fires for the AI in player slot 0.
+¹ The rebalance runs every 5th `think` call of each AI (a per-AI counter), so every AI player rebalances regardless of its staggered think tick.
 
 If its town centre is lost the AI tries to rebuild one with any surviving
 worker. In campaign quick games all AI opponents share team 2 against the
@@ -281,7 +281,9 @@ human on team 1.
 - **Filtering** (`Game.canSee`, used by `Snapshot` and `Apply`):
   - own and allied entities: always;
   - enemy and wild **units**: only on currently *visible* tiles;
-  - **buildings and resources**: once their tile is *explored*.
+  - **resources**: once their tile is *explored*;
+  - enemy **buildings**: once they have been *seen* (on a visible tile) at
+    least once; remembered afterwards.
 - **Commands** may only target entities the player can see; buildings may
   only be placed on explored tiles.
 - **Events** (shots, deaths, construction sounds …) are forwarded only if
@@ -290,9 +292,9 @@ human on team 1.
 - **Hidden fields**: for non-allied entities the snapshot omits carried
   resources, absolute max HP, production queues, rally points and farm food.
 
-Limitation: buildings in explored-but-not-visible areas are reported with
-their *current* state (existence, HP fraction, construction progress)
-rather than the last-seen state. See [security.md](security.md#35-known-limitations).
+Limitation: remembered enemy buildings are reported with their *current*
+state (HP fraction, construction progress, destruction) rather than a frozen
+last-seen copy. See [security.md](security.md#35-known-limitations).
 
 ## 9. Pathfinding and movement
 

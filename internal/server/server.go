@@ -447,6 +447,7 @@ func (s *Server) handleSaveLevel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "log in with an account to save levels")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, game.MaxLevelBytes)
 	var l game.Level
 	if err := decode(r, &l); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())

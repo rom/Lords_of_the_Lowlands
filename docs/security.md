@@ -70,7 +70,7 @@ flowchart LR
 | T18 | DoS | Slow WebSocket reader blocking the game | bounded 256-message queue per client; lossy snapshots dropped; reliable overflow disconnects; 10 s write timeout | `Client.enqueue`, `Hub.writer` |
 | T19 | DoS | Command / chat floods | 25 cmds/s (burst 60) and 1 chat/s (burst 5) per connection; room channel 512, ≤ 1024 commands per tick; ≤ 120 unit ids per command | `hub.go`, `room.go`, `protocol.go` |
 | T20 | DoS | Expensive simulation input | map ≤ 128², ≤ 6 000 objects, A* ≤ 4 000 expansions, queues ≤ 10, pop ≤ 200, ≤ `-max-rooms` rooms | `level.go`, `path.go` |
-| T21 | DoS | Disk exhaustion via levels | ≤ 50 levels per user, ≤ 5 000 total, 1 MiB body, registered users only | `store.SaveLevel` |
+| T21 | DoS | Disk exhaustion via levels | ≤ 50 levels per user, ≤ 5 000 total, 512 KiB per level body, registered users only | `store.SaveLevel` |
 | T22 | DoS | Panics killing the server | `recoverer` middleware; defensive bounds checks in the simulation | `server.go` |
 | T23 | Elevation | RCE in the server leading to host compromise | no `execve`, no `ptrace`, no mounts, no namespaces, no BPF/io_uring (seccomp); write access only to the data dir and no outbound TCP (Landlock); no capabilities; systemd sandbox; SELinux `lotl_t` | `internal/hardening`, `deploy/` |
 | T24 | Elevation | Stored XSS via names, chat, level text | names restricted to `[A-Za-z0-9_-]{3,20}`; text cleaned of control and bidi characters; client renders with `textContent`; CSP blocks inline/injected scripts | `ValidName`, `CleanText`, `el()` |
@@ -143,10 +143,11 @@ multiplier.
 
 ### 3.5 Known limitations
 
-- **Explored enemy buildings are live.** `canSee` reports enemy buildings on
-  explored (not only visible) tiles with their current HP and progress, so
-  new buildings placed in previously explored areas become known before they
-  are seen. A "last-seen" memory per player would close this.
+- **Remembered enemy buildings are live.** An enemy building becomes known
+  only once it has actually been *seen* (per-player memory `seenB`), so new
+  construction in old territory stays hidden until scouted. After that it is
+  reported with its current HP/progress rather than a frozen "last-seen"
+  copy, which leaks damage/destruction of remembered buildings.
 - **Public presence data.** Online player names, room lists and the
   leaderboard are visible to anyone with a session (and `/api/online` to
   anyone).

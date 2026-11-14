@@ -636,7 +636,7 @@ func TestCommandsMisc(t *testing.T) {
 	}
 	// enemy building: workers attack it
 	tc1 := own(g, 1, "town_center")[0]
-	g.Players[0].Explored[int(tc1.Y)*g.W+int(tc1.X)] = true
+	g.Players[0].Visible[int(tc1.Y)*g.W+int(tc1.X)] = true
 	_ = g.Apply(Command{Player: 0, Type: CmdSmart, IDs: []int{ws[1].ID}, Target: tc1.ID})
 	if ws[1].Order != OAttack {
 		t.Fatal("smart attack")
@@ -703,6 +703,22 @@ func TestSnapshotFogAndVisibility(t *testing.T) {
 	}
 	if vis == 0 || vis == len(st) {
 		t.Fatal("fog content")
+	}
+	// an enemy building placed in explored-but-not-visible land stays hidden
+	g.Players[0].Explored[20*g.W+20] = true
+	hidden := g.placeBuilding("house", 1, 20, 20, true)
+	for _, e := range g.Snapshot(0, nil, false).Ents {
+		if e.ID == hidden.ID {
+			t.Fatal("unseen enemy building leaked")
+		}
+	}
+	g.Players[0].Visible[int(hidden.Y)*g.W+int(hidden.X)] = true
+	if !g.canSee(0, hidden) {
+		t.Fatal("visible building not seen")
+	}
+	g.Players[0].Visible[int(hidden.Y)*g.W+int(hidden.X)] = false
+	if !g.canSee(0, hidden) {
+		t.Fatal("seen building should be remembered")
 	}
 	all := g.Snapshot(-1, nil, false)
 	if len(all.Ents) <= len(s.Ents) {
@@ -777,7 +793,7 @@ func TestFlyingAndSiege(t *testing.T) {
 	g := newGame(t, l, false)
 	f := g.spawnUnit("starfighter", 0, 8, 8)
 	tc1 := own(g, 1, "town_center")[0]
-	g.Players[0].Explored[int(tc1.Y)*g.W+int(tc1.X)] = true
+	g.Players[0].Visible[int(tc1.Y)*g.W+int(tc1.X)] = true
 	_ = g.Apply(Command{Player: 0, Type: CmdAttack, IDs: []int{f.ID}, Target: tc1.ID})
 	hp := tc1.HP
 	steps(g, 300)

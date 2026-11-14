@@ -13,6 +13,7 @@ type AI struct {
 	nextAttack int
 	attacking  bool
 	waveSize   int
+	thinks     int
 	stageUntil int
 	lastBuild  map[string]int
 }
@@ -131,7 +132,8 @@ func (a *AI) economy(g *Game, p *Player, s *aiState) {
 	}
 	// rebalance: move one worker from the most over-stocked resource to the
 	// scarcest one every few seconds
-	if g.Tick%50 == 0 {
+	a.thinks++
+	if a.thinks%5 == 0 {
 		hi, lo := -1, -1
 		for r := 0; r < NumRes; r++ {
 			if want[r] == 0 {

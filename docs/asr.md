@@ -53,7 +53,7 @@ The client only renders snapshots.
 | Response | snapshots contain only allied entities, enemy units on visible tiles, buildings/resources on explored tiles; private fields only for allies |
 | Measure | 0 hidden enemy units in any snapshot (test: snapshot of player A never contains player B's units outside A's team vision) |
 
-Known gap: explored enemy buildings are sent with live state
+Known gap: remembered enemy buildings are sent with live state
 ([security.md](security.md#35-known-limitations)).
 
 ### ASR-3 — Host protection
