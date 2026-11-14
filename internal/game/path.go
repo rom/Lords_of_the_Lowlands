@@ -27,8 +27,17 @@ func (h *nodeHeap) Pop() interface{} {
 	return n
 }
 
-// maxExpand bounds the A* search effort per request.
-const maxExpand = 4000
+// minExpand bounds the A* search effort per request on small maps; larger
+// maps get a budget proportional to their area (see expandBudget).
+const minExpand = 4000
+
+// expandBudget is the A* node budget for this map.
+func (g *Game) expandBudget() int {
+	if b := g.W * g.H / 6; b > minExpand {
+		return b
+	}
+	return minExpand
+}
 
 // walkable reports whether a ground unit may enter tile (x,y).
 func (g *Game) walkable(x, y int) bool {
@@ -74,7 +83,18 @@ func (g *Game) findPath(sx, sy float64, goal rect) []Pt {
 		return nil
 	}
 	if !g.goalOpen(goal) {
-		return nil
+		// The destination cannot be stood on (inside a building, a forest or
+		// a crowd): head for the nearest ring around it that can.
+		grown := false
+		for r := 1; r <= 6 && !grown; r++ {
+			e := rect{goal.x0 - r, goal.y0 - r, goal.x1 + r, goal.y1 + r}
+			if g.goalOpen(e) {
+				goal, grown = e, true
+			}
+		}
+		if !grown || goal.contains(sxi, syi) {
+			return nil
+		}
 	}
 	n := g.W * g.H
 	if len(g.pathG) != n {
@@ -113,7 +133,8 @@ func (g *Game) findPath(sx, sy float64, goal rect) []Pt {
 	push(start, 0, -1)
 	best, bestH := start, goal.dist(sxi, syi)
 	found := -1
-	for exp := 0; open.Len() > 0 && exp < maxExpand; exp++ {
+	budget := g.expandBudget()
+	for exp := 0; open.Len() > 0 && exp < budget; exp++ {
 		cur := heap.Pop(open).(*node)
 		cur.hi = -1
 		if g.pathClosed[cur.idx] == gen {

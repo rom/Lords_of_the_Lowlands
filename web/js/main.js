@@ -31,6 +31,11 @@ class App {
       sel.replaceChildren(...(sel.dataset.default ? [el('option', { value: '', text: sel.dataset.default })] : []),
         ...DIFFICULTIES.map(([v, t]) => el('option', { value: v, text: t, selected: v === 'normal' && !sel.dataset.default ? '' : null })));
     }
+    // map size presets (mini ... enormous) come from the server's defs
+    for (const sel of $$('.sizesel')) {
+      sel.replaceChildren(...(sel.dataset.default ? [el('option', { value: '', text: sel.dataset.default })] : []),
+        ...((this.defs && this.defs.mapSizes) || []).map(z => el('option', { value: z.id, text: `${z.name} (${z.tiles}×${z.tiles})`, selected: z.id === 'normal' && !sel.dataset.default ? '' : null })));
+    }
     $('#skmaptype').replaceChildren(...MAP_TYPES.map(([v, t]) => el('option', { value: v, text: t })));
     if (this.defs) this.backdrop();
     try { this.me = await api('/api/me'); } catch (e) { this.me = null; }
@@ -98,8 +103,9 @@ class App {
     $('#create').addEventListener('click', () => {
       const v = $('#newlevel').value;
       const msg = { t: 'create', name: $('#newname').value || `${this.me.name}'s battle` };
-      if (v === 'skirmish:random') msg.skirmish = { theme: 'temperate', size: 80, startAge: 0, maxAge: 5, seed: Math.floor(Math.random() * 1e9), water: 0.3 };
+      if (v === 'skirmish:random') msg.skirmish = { theme: 'temperate', size: 112, startAge: 0, maxAge: 5, seed: Math.floor(Math.random() * 1e9), water: 0.3 };
       else msg.level = v;
+      if ($('#newsize').value) msg.mapSize = $('#newsize').value;
       this.net.send(msg);
     });
     $('#lobbychatform').addEventListener('submit', (e) => {
@@ -118,7 +124,7 @@ class App {
     $('#startbtn').addEventListener('click', () => this.net.send({ t: 'start' }));
     $('#leaveroom').addEventListener('click', () => { this.net.send({ t: 'leave' }); this.room = null; this.show('lobby'); });
     $('#scorelevel').addEventListener('change', () => this.loadScores());
-    $('#settingsback').addEventListener('click', () => { if (this.game) { $('#overlay').classList.add('hidden'); this.show('none'); $('#screens').classList.add('hidden'); } else this.show('menu'); });
+    $('#settingsback').addEventListener('click', () => this.closeSettings());
     for (const id of ['vmaster', 'vsfx', 'vmusic']) $('#' + id).addEventListener('input', (e) => { audioSettings()[id.slice(1)] = e.target.value / 100; saveAudio(); });
     $('#vmute').addEventListener('change', (e) => { audioSettings().muted = e.target.checked; saveAudio(); });
     window.addEventListener('resize', () => { if (this.bg) this.bg.resize(); });
@@ -276,7 +282,7 @@ class App {
         el('div', { class: 'ages', text: a0.name === a1.name ? a0.name : `${a0.name} → ${a1.name}` }),
         el('div', { class: 'desc', text: l.description }),
         el('div', { class: 'obj', text: `${objectiveText(l.objective, this.defs, l.maxAge)} · ${l.opponents} opponent${l.opponents > 1 ? 's' : ''} · ${l.difficulty}` }));
-      card.addEventListener('click', () => { sfx('click'); this.net.send({ t: 'quick', level: l.id, diff: $('#campdiff').value }); });
+      card.addEventListener('click', () => { sfx('click'); this.net.send({ t: 'quick', level: l.id, diff: $('#campdiff').value, mapSize: $('#campsize').value || undefined }); });
       return card;
     }));
   }
@@ -296,15 +302,16 @@ class App {
     initAudio(); sfx('click');
     const map = $('#skmap').value;
     const opp = +$('#skopp').value, diff = $('#skdiff').value;
-    if (map !== 'random') { this.net.send({ t: 'quick', level: map, opp, diff }); return; }
+    const mapSize = $('#sksize').value;
+    if (map !== 'random') { this.net.send({ t: 'quick', level: map, opp, diff, mapSize }); return; }
     const start = +$('#skstart').value; let max = +$('#skmax').value; if (max < start) max = start;
-    this.net.send({ t: 'quick', opp, diff, skirmish: { theme: $('#sktheme').value, size: +$('#sksize').value, startAge: start, maxAge: max, seed: Math.floor(Math.random() * 1e9), water: $('#skwater').value / 100, mapType: $('#skmaptype').value } });
+    this.net.send({ t: 'quick', opp, diff, mapSize, skirmish: { theme: $('#sktheme').value, startAge: start, maxAge: max, seed: Math.floor(Math.random() * 1e9), water: $('#skwater').value / 100, mapType: $('#skmaptype').value } });
   }
 
   renderLobby(m) {
     this.lobby = m;
     $('#roomlist').replaceChildren(...(m.rooms.length ? m.rooms.map(r => el('div', { class: 'roomrow' },
-      el('div', {}, el('b', { text: r.name }), el('div', { class: 'fine', text: `${r.level} · host ${r.host}` })),
+      el('div', {}, el('b', { text: r.name }), el('div', { class: 'fine', text: `${r.level} · ${r.size}×${r.size} · host ${r.host}` })),
       el('div', { class: 'fine', text: `${r.players}/${r.max} · ${r.state}` }),
       r.state === 'lobby' && r.open > 0 ? el('button', { class: 'btn small', text: 'Join', onclick: () => this.net.send({ t: 'join', room: r.id }) }) : el('span', { text: '' })))
       : [el('div', { class: 'fine', text: 'No battles yet — create one!' })]));
@@ -313,7 +320,7 @@ class App {
 
   renderRoom(r) {
     $('#roomtitle').textContent = r.name;
-    $('#roomlevel').textContent = `${r.level.name} — ${this.defs.ages[r.level.startAge].name} to ${this.defs.ages[r.level.maxAge].name} · ${objectiveText(r.level.objective, this.defs, r.level.maxAge)}`;
+    $('#roomlevel').textContent = `${r.level.name} — ${this.defs.ages[r.level.startAge].name} to ${this.defs.ages[r.level.maxAge].name} · ${objectiveText(r.level.objective, this.defs, r.level.maxAge)} · ${r.level.width}×${r.level.height} map`;
     const host = r.host === this.me.name;
     $('#startbtn').classList.toggle('hidden', !host);
     $('#slots').replaceChildren(...r.slots.map((s, i) => {
@@ -361,10 +368,17 @@ class App {
     this.backdrop();
   }
 
+  // Settings opened from inside a game are shown above the game layer.
   showSettings() {
     $('#overlay').classList.add('hidden');
     $('#screens').classList.remove('hidden');
+    $('#screens').classList.toggle('ingame', !!this.game);
     this.show('settings');
+  }
+
+  closeSettings() {
+    $('#screens').classList.remove('ingame');
+    if (this.game) { $('#screens').classList.add('hidden'); this.screen = 'game'; } else this.show('menu');
   }
 
   loadSettings() {

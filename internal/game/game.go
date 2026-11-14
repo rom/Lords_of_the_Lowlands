@@ -48,6 +48,7 @@ type QItem struct {
 
 // Entity is any unit, building or resource on the map.
 type Entity struct {
+	chg   int // tick a resource was created or its amount last changed (snapshot deltas)
 	ID    int
 	Kind  int
 	Type  string
@@ -189,6 +190,7 @@ type pendingHit struct {
 
 // Game is a running match.
 type Game struct {
+	gone    []int // resources removed during the current tick (snapshot deltas)
 	Level   *Level
 	W, H    int
 	Tiles   []byte
@@ -327,7 +329,7 @@ func (g *Game) setupStart(p *Player, s Point) {
 }
 
 func (g *Game) newEntity(kind int, typ string, owner int, x, y float64) *Entity {
-	e := &Entity{ID: g.nextID, Kind: kind, Type: typ, Owner: owner, X: x, Y: y}
+	e := &Entity{ID: g.nextID, Kind: kind, Type: typ, Owner: owner, X: x, Y: y, chg: g.Tick}
 	g.nextID++
 	g.Ents[e.ID] = e
 	g.order = append(g.order, e.ID)
@@ -455,6 +457,9 @@ func (g *Game) remove(e *Entity) {
 		return
 	}
 	e.dead = true
+	if e.Kind == KResource {
+		g.gone = append(g.gone, e.ID)
+	}
 	if e.Kind == KBuilding && e.Type != "farm" {
 		for y := e.TileY; y < e.TileY+e.B.Size; y++ {
 			for x := e.TileX; x < e.TileX+e.B.Size; x++ {
@@ -534,6 +539,7 @@ func (g *Game) Step() {
 		return
 	}
 	g.Tick++
+	g.gone = g.gone[:0]
 	g.buildGrid()
 	for _, p := range g.Players {
 		if p.ai != nil && !p.Defeated && p.ai.prof.Trickle > 0 {
@@ -1216,7 +1222,11 @@ func (g *Game) damage(t *Entity, h pendingHit, mul float64) {
 	t.HP -= dmg
 	if t.Owner >= 0 && g.Tick-g.Players[t.Owner].alertTick > 100 && h.attOwn >= 0 {
 		g.Players[t.Owner].alertTick = g.Tick
-		g.emit(Event{K: "alert", X: t.X, Y: t.Y, O: t.Owner})
+		ev := Event{K: "alert", X: t.X, Y: t.Y, O: t.Owner, P: t.Type}
+		if t.Kind == KBuilding {
+			ev.D = 1 // a building is under attack: the client sounds the bell
+		}
+		g.emit(ev)
 	}
 	// retaliation
 	if t.Kind == KUnit && t.HP > 0 {
@@ -1401,6 +1411,7 @@ func (g *Game) gatherStep(u *Entity) {
 	rate := g.gatherRate(u, t.R)
 	amt := math.Min(rate*DT, t.Amount)
 	t.Amount -= amt
+	t.chg = g.Tick
 	if u.CarryRes != t.R.Res {
 		u.Carry = 0
 	}
@@ -1612,7 +1623,9 @@ func (g *Game) updateVisibility() {
 
 func (g *Game) alive(p *Player) bool {
 	for _, e := range g.Ents {
-		if e.Owner == p.Index && (e.Kind == KUnit || (e.Kind == KBuilding && e.Type != "farm" && e.Type != "house")) {
+		// a player is alive while they have a land unit or a building other
+		// than houses and farms; ships alone cannot hold out forever
+		if e.Owner == p.Index && ((e.Kind == KUnit && !e.U.Naval) || (e.Kind == KBuilding && e.Type != "farm" && e.Type != "house")) {
 			return true
 		}
 	}

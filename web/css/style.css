@@ -160,7 +160,7 @@ button.cmd:hover { border-color: var(--gold); filter: brightness(1.25); }
 button.cmd.disabled { filter: grayscale(1) brightness(0.5); }
 button.cmd.poor::after { content: ""; position: absolute; inset: 0; background: rgba(160,20,10,0.35); }
 .hk { position: absolute; right: 2px; bottom: 1px; font-size: 10px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
-#tooltip { position: fixed; z-index: 40; max-width: 270px; background: rgba(18,13,8,0.96); border: 1px solid var(--gold); border-radius: 4px; padding: 8px 10px; font-size: 13px; color: var(--ink-dim); pointer-events: none; }
+#tooltip { position: fixed; z-index: 70; max-width: 270px; background: rgba(18,13,8,0.96); border: 1px solid var(--gold); border-radius: 4px; padding: 8px 10px; font-size: 13px; color: var(--ink-dim); pointer-events: none; }
 #tooltip b { color: var(--gold); display: block; margin-bottom: 4px; font-size: 15px; }
 
 #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
@@ -188,3 +188,65 @@ input.short { width: 90px; }
 @keyframes pulse { 50% { opacity: 0.55; } }
 #game.spectator #bottombar, #game.spectator #resbar, #game.spectator #menubtn, #game.spectator #chatbox { display: none; }
 #game.spectator .minibox-spec { position: absolute; right: 12px; bottom: 12px; width: 220px; height: 220px; }
+
+/* settings opened from inside a game: above the game layer */
+#screens.ingame { z-index: 55; background: rgba(5,4,3,0.82); justify-content: center; }
+#screens.ingame .logo { display: none; }
+
+/* in-game help (? / F1) and dialogs */
+#helpbtn { min-width: 30px; font-weight: bold; margin-right: 6px; }
+#techbtn { margin-left: auto; margin-right: 6px; }
+#game.spectator #techbtn { display: none; }
+.help-box { width: min(980px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 18px 22px; }
+.help-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.help-head h2 { margin: 0; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 6px 22px; margin-top: 8px; }
+.help-grid h3 { margin: 10px 0 4px; color: var(--gold); font-size: 15px; border-bottom: 1px solid var(--gold-dim); padding-bottom: 3px; }
+.help-grid table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.help-grid td { padding: 3px 4px; vertical-align: top; }
+.help-grid td:first-child { width: 44%; padding-right: 10px; }
+kbd { display: inline-block; margin: 0 3px 2px 0; padding: 1px 6px; border: 1px solid var(--gold-dim); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.dialog p { margin: 0; color: var(--ink-dim); }
+.dialog input { width: 100%; }
+.dialog .row { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* tech tree (F2 / Y) */
+.tech-box { width: min(1500px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; }
+.tech-box .help-head h2 { margin: 0; }
+.tt-sum { color: var(--ink-dim); font-size: 14px; flex: 1; text-align: center; }
+.tt-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
+.tt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.tt-legend i.tt-cell { width: 14px; height: 14px; min-height: 0; padding: 0; }
+.tt-grid { overflow: auto; flex: 1; border: 1px solid var(--gold-dim); border-radius: 6px; background: rgba(0,0,0,0.25); }
+.tt-row { display: flex; align-items: stretch; border-bottom: 1px solid rgba(217,180,90,0.12); }
+.tt-col, .tt-age { flex: 0 0 84px; width: 84px; }
+.tt-col { display: flex; align-items: center; justify-content: center; padding: 3px; }
+.tt-col > .tt-cell { width: 100%; margin: 0; }
+.tt-col > .tt-stack { width: 100%; }
+.tt-row.sub { background: rgba(255,255,255,0.025); }
+.tt-label { flex: 0 0 104px !important; position: sticky; left: 0; z-index: 2; background: #1d1711; color: var(--gold); font-size: 13px; padding: 8px; display: flex; align-items: center; border-right: 1px solid var(--gold-dim); }
+.tt-head { position: sticky; top: 0; z-index: 3; background: #1d1711; }
+.tt-head .tt-label { z-index: 4; }
+.tt-age { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 2px; font-size: 11px; color: var(--ink-dim); text-align: center; line-height: 1.15; }
+.tt-age b { color: var(--ink); font-size: 13px; }
+.tt-age.past b { color: var(--ok); }
+.tt-age.cur { background: rgba(217,180,90,0.22); color: var(--ink); box-shadow: inset 0 -2px 0 var(--gold); }
+.tt-stack { display: grid; grid-template-columns: repeat(2, 38px); gap: 3px; justify-content: center; }
+.tt-cell { position: relative; display: flex; align-items: center; justify-content: center; min-height: 48px; margin: 3px; border-radius: 6px; border: 2px solid transparent; background: rgba(255,255,255,0.04); }
+.tt-stack .tt-cell { margin: 0; min-height: 0; padding: 1px; }
+.tt-cell canvas { display: block; }
+.tt-cell.empty { background: none; }
+.tt-cell.done { border-color: #3f8a3c; background: rgba(79,174,74,0.18); }
+.tt-cell.done.old { opacity: 0.55; }
+.tt-cell.now { border-color: var(--gold); background: rgba(217,180,90,0.16); box-shadow: 0 0 8px rgba(217,180,90,0.35); }
+.tt-cell.now.poor { border-color: #9a6b3a; box-shadow: none; }
+.tt-cell.busy { border-color: #4f9ad8; background: rgba(79,154,216,0.18); }
+.tt-cell.later { opacity: 0.38; filter: grayscale(0.7); }
+.tt-cell.off { opacity: 0.25; filter: grayscale(1); border-style: dashed; border-color: #555; }
+.tt-cell.click { cursor: pointer; }
+.tt-cell.click:hover { transform: translateY(-1px); border-color: #ffe28a; }
+.tt-badge { position: absolute; right: 1px; bottom: -2px; font-size: 12px; color: #8fe08a; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.tt-prog { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 4px; background: rgba(0,0,0,0.6); border-radius: 2px; }
+.tt-prog div { height: 100%; background: #6fb8f0; border-radius: 2px; }
+.tt-cell canvas { max-width: 100%; height: auto; }
+.tt-stack .tt-cell canvas { width: 32px; height: 32px; }

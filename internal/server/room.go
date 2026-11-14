@@ -42,6 +42,10 @@ type Slot struct {
 }
 
 // Room is a lobby room that becomes a match.
+// keyframeTicks is how often (in ticks) a complete snapshot is sent; in
+// between, unchanged resources are left out (see game.SnapshotDelta).
+const keyframeTicks = 50
+
 type Room struct {
 	hub      *Hub
 	ID       string
@@ -74,6 +78,7 @@ type roomSummary struct {
 	State   string `json:"state"`
 	Players int    `json:"players"`
 	Max     int    `json:"max"`
+	Size    int    `json:"size"` // map edge length in tiles
 	Open    int    `json:"open"`
 }
 
@@ -89,7 +94,7 @@ func (r *Room) summary() roomSummary {
 			open++
 		}
 	}
-	return roomSummary{r.ID, r.Name, r.Host, r.Level.Name, r.Level.ID, r.State, n, len(r.Slots), open}
+	return roomSummary{r.ID, r.Name, r.Host, r.Level.Name, r.Level.ID, r.State, n, len(r.Slots), r.Level.Width, open}
 }
 
 type roomView struct {
@@ -187,6 +192,11 @@ func (h *Hub) createRoom(c *Client, m *ClientMsg) {
 			return
 		}
 	}
+	l, err := levels.Resize(l, m.MapSize)
+	if err != nil {
+		c.errorMsg(err.Error())
+		return
+	}
 	r, err := h.newRoom(c, m.Name, l, 0, m.Diff)
 	if err != nil {
 		c.errorMsg(err.Error())
@@ -212,6 +222,11 @@ func (h *Hub) quickGame(c *Client, m *ClientMsg) {
 		}
 	} else if l, ok = h.s.findLevel(m.Level); !ok {
 		c.errorMsg("unknown level")
+		return
+	}
+	var err error
+	if l, err = levels.Resize(l, m.MapSize); err != nil {
+		c.errorMsg(err.Error())
 		return
 	}
 	opp := m.Opp
@@ -614,16 +629,25 @@ func (r *Room) tick(cmds []game.Command) bool {
 	g.Step()
 	ev := g.Events()
 	fog := g.Tick%5 == 1
+	key := g.Tick%keyframeTicks == 1
 	for _, s := range r.Slots {
 		if s.client == nil || s.Kind != SlotHuman {
 			continue
 		}
-		snap := g.Snapshot(s.player, ev, fog)
+		k := key || s.client.keyedFor != g
+		s.client.keyedFor = g
+		snap := g.SnapshotDelta(s.player, ev, fog, k)
 		s.client.sendJSON(map[string]interface{}{"t": "snap", "s": snap}, true)
 		m.snapshots.Add(1)
 	}
 	if len(r.spectators) > 0 {
-		b, _ := json.Marshal(map[string]interface{}{"t": "snap", "s": g.Snapshot(-1, ev, false)})
+		k := key
+		for _, c := range r.spectators {
+			if c.keyedFor != g {
+				k, c.keyedFor = true, g
+			}
+		}
+		b, _ := json.Marshal(map[string]interface{}{"t": "snap", "s": g.SnapshotDelta(-1, ev, false, k)})
 		for _, c := range r.spectators {
 			c.enqueue(b, true)
 			m.snapshots.Add(1)

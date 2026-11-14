@@ -57,6 +57,7 @@
     <div class="campaign-grid" id="campgrid"></div>
     <div class="row">
       <label>Difficulty <select id="campdiff" class="diffsel" data-default="Level default"></select></label>
+      <label>Map size <select id="campsize" class="sizesel" data-default="Chapter default"></select></label>
       <button class="btn" data-go="menu">Back</button>
     </div>
   </section>
@@ -67,7 +68,7 @@
       <label>Map <select id="skmap"><option value="random">Random map</option></select></label>
       <label>Theme <select id="sktheme"></select></label>
       <label>Map type <select id="skmaptype"></select></label>
-      <label>Size <select id="sksize"><option value="56">Small</option><option value="72" selected>Medium</option><option value="96">Large</option><option value="120">Huge</option></select></label>
+      <label>Map size <select id="sksize" class="sizesel"></select></label>
       <label>Water <input id="skwater" type="range" min="0" max="100" value="30"></label>
       <label>Start age <select id="skstart"></select></label>
       <label>Final age <select id="skmax"></select></label>
@@ -85,6 +86,7 @@
         <div id="roomlist" class="list"></div>
         <div class="row">
           <select id="newlevel"></select>
+          <select id="newsize" class="sizesel" data-default="Map default" title="Map size"></select>
           <input id="newname" placeholder="Battle name" maxlength="48">
           <button class="btn primary" id="create">Create</button>
         </div>
@@ -160,7 +162,7 @@
 
 <div id="game" class="hidden">
   <canvas id="view"></canvas>
-  <div id="topbar"><div id="resbar"></div><button id="menubtn" class="btn small">Menu</button></div>
+  <div id="topbar"><div id="resbar"></div><button id="techbtn" class="btn small" title="Your tech tree (F2 or Y)">Tech Tree</button><button id="helpbtn" class="btn small" title="Keyboard shortcuts (? or F1)">?</button><button id="menubtn" class="btn small" title="Game menu (F10)">Menu</button></div>
   <div id="pscores"></div>
   <div id="toasts"></div>
   <div id="gamechat"></div>

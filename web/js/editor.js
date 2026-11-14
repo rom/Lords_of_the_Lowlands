@@ -7,7 +7,7 @@ import { theme, iconCanvas, resourceSprite } from './sprites.js';
 const TERRAIN = ['Grass', 'Dirt', 'Sand', 'Water', 'Mountain', 'Ford', 'Road'];
 const OBJECTS = ['tree', 'berry', 'gold', 'stone', 'crystal', 'fish', 'deer', 'boar', 'mammoth'];
 const THEMES = ['temperate', 'desert', 'winter', 'tropical', 'moon', 'mars', 'space'];
-const MIN = 24, MAX = 128;
+const MIN = 24, MAX = 256;
 
 class Editor {
   constructor() {
@@ -27,7 +27,7 @@ class Editor {
     this.bindInput();
     await this.listLevels();
     const q = new URLSearchParams(location.search).get('level');
-    if (q) await this.open(q); else this.newLevel(64, 64, 'temperate');
+    if (q) await this.open(q); else this.newLevel(96, 96, 'temperate');
     this.loop();
   }
 
@@ -86,7 +86,7 @@ class Editor {
     }
     if (l.maxAge < l.startAge) return 'Final age must not be before start age';
     if (l.objective.type === 'advance' && l.maxAge === l.startAge) return 'Advance objective needs a later final age';
-    if (this.objects.size > 6000) return 'Too many objects (max 6000)';
+    if (this.objects.size > 20000) return 'Too many objects (max 20000)';
     return '';
   }
 
@@ -149,6 +149,7 @@ class Editor {
     $('#edown').addEventListener('click', () => this.download());
     $('#eup').addEventListener('change', (e) => this.upload(e.target.files[0]));
     $('#eundo').addEventListener('click', () => this.doUndo());
+    $('#ehelp').addEventListener('click', () => { this.help(); this.helpOpen = true; });
     $('#egrid').addEventListener('change', () => {});
   }
 
@@ -192,11 +193,11 @@ class Editor {
   }
 
   newDialog() {
-    const w = el('input', { type: 'number', min: MIN, max: MAX, value: 64 }), h = el('input', { type: 'number', min: MIN, max: MAX, value: 64 });
+    const w = el('input', { type: 'number', min: MIN, max: MAX, value: 96 }), h = el('input', { type: 'number', min: MIN, max: MAX, value: 96 });
     const th = el('select', {}, ...THEMES.map(t => el('option', { value: t, text: t })));
     const box = el('div', { class: 'panel menu-box' }, el('h2', { text: 'New Level' }),
       el('label', {}, 'Width ', w), el('label', {}, 'Height ', h), el('label', {}, 'Theme ', th),
-      el('button', { class: 'btn primary', text: 'Create', onclick: () => { this.newLevel(clamp(+w.value || 64, MIN, MAX), clamp(+h.value || 64, MIN, MAX), th.value); $('#overlay').classList.add('hidden'); } }),
+      el('button', { class: 'btn primary', text: 'Create', onclick: () => { this.newLevel(clamp(+w.value || 96, MIN, MAX), clamp(+h.value || 96, MIN, MAX), th.value); $('#overlay').classList.add('hidden'); } }),
       el('button', { class: 'btn', text: 'Cancel', onclick: () => $('#overlay').classList.add('hidden') }));
     $('#overlay').replaceChildren(box); $('#overlay').classList.remove('hidden');
   }
@@ -231,7 +232,7 @@ class Editor {
 
   async upload(f) {
     if (!f) return;
-    if (f.size > 512 * 1024) { this.status('File too large'); return; }
+    if (f.size > 1024 * 1024) { this.status('File too large'); return; }
     try {
       const l = JSON.parse(await f.text());
       if (typeof l.width !== 'number' || typeof l.height !== 'number' || typeof l.tiles !== 'string' || l.tiles.length !== l.width * l.height || l.width < MIN || l.width > MAX || l.height < MIN || l.height > MAX) throw new Error('Not a valid level file');
@@ -250,6 +251,16 @@ class Editor {
   snapshot() {
     this.undo.push({ tiles: this.tiles.slice(), objects: new Map(this.objects), starts: this.starts.map(s => ({ ...s })) });
     if (this.undo.length > 40) this.undo.shift();
+  }
+
+  help() {
+    const rows = [['1…7', 'Terrain: ' + TERRAIN.join(', ')], ['Shift+1…9', 'Objects: ' + OBJECTS.join(', ')], ['E / Del', 'Eraser'], ['P', 'Start position tool'],
+      ['[ / ]', 'Smaller / larger brush'], ['G', 'Toggle grid'], ['N', 'New level'], ['Ctrl+Z', 'Undo'], ['Ctrl+S', 'Save to server'],
+      ['Left drag', 'Paint'], ['Right drag / arrows', 'Pan'], ['Wheel  or  + / −', 'Zoom (0 resets)'], ['? / F1', 'This help'], ['Esc', 'Close window']];
+    const box = el('div', { class: 'panel help-box' },
+      el('div', { class: 'help-head' }, el('h2', { text: 'Editor Shortcuts' }), el('button', { class: 'btn small', text: 'Close (Esc)', onclick: () => { $('#overlay').classList.add('hidden'); this.helpOpen = false; } })),
+      el('div', { class: 'help-grid' }, el('section', {}, el('table', {}, ...rows.map(([k, d]) => el('tr', {}, el('td', {}, ...k.split('  ').map(p => el('kbd', { text: p }))), el('td', { text: d })))))));
+    $('#overlay').replaceChildren(box); $('#overlay').classList.remove('hidden');
   }
 
   doUndo() {
@@ -313,8 +324,26 @@ class Editor {
     window.addEventListener('mouseup', () => { this.panning = null; this.painting = false; });
     cv.addEventListener('wheel', (e) => { e.preventDefault(); this.r.setZoom(this.r.zoom * (e.deltaY < 0 ? 1.1 : 0.9), e.offsetX, e.offsetY); }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); this.doUndo(); }
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+      const ov = $('#overlay');
+      if (k === '?' || k === 'f1') { e.preventDefault(); if (this.helpOpen) ov.classList.add('hidden'); else this.help(); this.helpOpen = !this.helpOpen; return; }
+      if (!ov.classList.contains('hidden')) { if (k === 'escape') { ov.classList.add('hidden'); this.helpOpen = false; } return; }
+      if (ctrl && k === 'z') { e.preventDefault(); this.doUndo(); return; }
+      if (ctrl && k === 's') { e.preventDefault(); this.save(); return; }
+      if (ctrl) return;
+      const tools = [...document.querySelectorAll('.tool')];
+      const pick = (f) => { const b = tools.find(x => f(JSON.parse(x.dataset.tool))); if (b) b.click(); };
+      if (/^[1-7]$/.test(k) && !e.shiftKey) { pick(t => t.kind === 'terrain' && t.v === +k - 1); return; }
+      if (/^Digit[1-9]$/.test(e.code) && e.shiftKey) { const o = OBJECTS[+e.code.slice(5) - 1]; if (o) pick(t => t.kind === 'object' && t.v === o); return; }
+      if (k === 'e' || k === 'delete') { pick(t => t.kind === 'erase'); return; }
+      if (k === 'p') { pick(t => t.kind === 'start'); return; }
+      if (k === '[' || k === ']') { const sel = $('#ebrush'); sel.selectedIndex = clamp(sel.selectedIndex + (k === ']' ? 1 : -1), 0, sel.options.length - 1); this.status(`Brush ${sel.options[sel.selectedIndex].text}`); return; }
+      if (k === 'g') { $('#egrid').checked = !$('#egrid').checked; return; }
+      if (k === 'n') { this.newDialog(); return; }
+      if (k === '+' || k === '=') { this.r.setZoom(this.r.zoom * 1.15); return; }
+      if (k === '-') { this.r.setZoom(this.r.zoom / 1.15); return; }
+      if (k === '0') { this.r.setZoom(1); return; }
       const sp = 60;
       if (e.key === 'ArrowLeft') this.r.pan(-sp, 0); if (e.key === 'ArrowRight') this.r.pan(sp, 0);
       if (e.key === 'ArrowUp') this.r.pan(0, -sp); if (e.key === 'ArrowDown') this.r.pan(0, sp);

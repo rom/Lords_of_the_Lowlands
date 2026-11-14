@@ -5,3 +5,4 @@
 *.test
 /testdata/fuzz/*/corpus-tmp
 node_modules/
+/lotl

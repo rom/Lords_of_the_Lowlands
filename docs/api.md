@@ -17,7 +17,7 @@ Values in *italics* are defaults from the YAML configuration
 | Authentication | session cookie `lotl_session` (32 random bytes, base64url, 43 chars), `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` = `security.sessionTTL` (*168h*), `Secure` when TLS or `secureCookies` |
 | Session re-validation | on **every** request the account behind a registered session is re-read: deleted, `blocked` or `pending` accounts lose the session immediately, and the admin flag follows the current role |
 | Restricted session | an account that must use MFA but has not enrolled gets a session with `mfaSetup: true`; it is accepted only by `/api/me`, `/api/mfa/setup`, `/api/mfa/enable` and `/api/logout` (everything else answers as if not logged in) |
-| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most `security.maxBodyBytes` (*1 MiB*; **512 KiB** for `POST /api/levels`); exactly one JSON value; **unknown fields are rejected** → **400** `invalid JSON body` |
+| Request bodies | `Content-Type: application/json` required for every non-GET `/api/*` request except `DELETE` (else **415**); at most `security.maxBodyBytes` (*1 MiB*; **1 MiB** for `POST /api/levels`); exactly one JSON value; **unknown fields are rejected** → **400** `invalid JSON body` |
 | CSRF | non-GET `/api/*` requests must carry an `Origin` (or `Referer`) whose host equals the request `Host` or one of `allowedOrigins`; requests without either header are accepted only if `Sec-Fetch-Site` is absent or `same-origin` → else **403** `cross-origin request refused` |
 | Rate limits | all `/api/*`: `apiRate`/`apiBurst` (*20/s, burst 60*) per client IP → **429** `rate limit exceeded`; `register`/`login` additionally `authRate`/`authBurst` (*0.2/s, burst 8*) → **429** `too many attempts, try later` |
 | Client IP | `RemoteAddr`; the last `X-Forwarded-For` entry only with `trustProxy` |
@@ -390,7 +390,7 @@ Returns a random map as a full `Level` (`id` empty, `name` `"New Level"`).
 {"theme":"desert","size":72,"startAge":0,"maxAge":3,"seed":12345,"water":0.3,"players":4,"mapType":"riverland"}
 ```
 
-All fields optional: `size` 0 → 72 (else 24..128), `players` outside 2..8 → 2,
+All fields optional: `size` 0 → 112 (else 24..256), `players` outside 2..8 → 2,
 `water` outside 0..1 → 0.3, `maxAge < startAge` → `startAge`. **400** on
 validation errors (e.g. size out of range, unknown theme, `unknown map type "…"`).
 `mapType` is one of `inland` (default), `coastal`, `riverland`, `lakes`,
@@ -456,8 +456,8 @@ all are validated by `ParseClientMsg`.
 |---|---|---|---|
 | `ping` | — | `pong` reply | |
 | `chat` | `ch` (`global`\|`room`\|`team`\|`whisper`), `text`, `to` (whisper) | chat | text cleaned and cut to 300 runes, must be non-empty; `to` ≤ 32 bytes; 1 msg/s, burst 5 |
-| `create` | `name`, `level` or `skirmish`, `diff` | create a lobby room (you are host) | name cleaned to 48 runes (default `Battle`); `level` ≤ 64 bytes; skirmish rooms have 4 seats |
-| `quick` | `level` or `skirmish`, `opp`, `diff` | create and immediately start a game vs AI | `opp` 0..7 (0 = level default); skirmish players = `opp + 1` |
+| `create` | `name`, `level` or `skirmish`, `diff`, `mapSize` | create a lobby room (you are host) | name cleaned to 48 runes (default `Battle`); `level` ≤ 64 bytes; skirmish rooms have 4 seats |
+| `quick` | `level` or `skirmish`, `opp`, `diff`, `mapSize` | create and immediately start a game vs AI | `opp` 0..7 (0 = level default); skirmish players = `opp + 1` |
 | `join` | `room` | take the first open seat (also reserved seats of a restored game) | `room` ≤ 32 bytes; lobby state only (demo rooms cannot be joined) |
 | `leave` | — | leave the room; resigns if the game is running; ends a demo | |
 | `slot` | `slot`, `kind` (`open`\|`closed`\|`ai`), `team`, `diff` | host edits a seat | `slot` 0..7, `team` 0..8 |
@@ -471,8 +471,17 @@ all are validated by `ParseClientMsg`.
 
 `diff` is `""` (normal), `super_easy`, `easy`, `normal`, `hard`,
 `super_hard` or `insane`. `skirmish` is
-`{"theme","size","startAge","maxAge","seed","water","mapType"}` (size 0..128,
+`{"theme","size","startAge","maxAge","seed","water","mapType"}` (size 0..256,
 ages 0..16, map type as for `/api/generate`).
+
+`mapSize` picks a size preset and overrides `size` and the level's own size:
+`mini` 48, `tiny` 64, `small` 80, `normal` 112, `large` 144, `very_large` 176,
+`huge` 208, `enormous` 256 (tiles per side; also listed in `/api/defs` as
+`mapSizes`). Empty keeps the level's size. Campaign chapters and other
+generated levels can be resized; hand-drawn custom levels keep their size
+(`error`: *this map was drawn by hand and has a fixed size*); an unknown preset
+is rejected by the parser. Lobby room summaries carry the map edge length as
+`size`.
 
 Examples:
 
@@ -643,7 +652,7 @@ time), `melee`, `boom` (splash, `d` radius), `death`, `collapse`, `work`,
 | Demo rooms | `game.demo.maxRooms` (10) | `room_extra.go` |
 | Players per game | 2..8 | `game.MaxPlayers` |
 | Session lifetime | `security.sessionTTL` (7 days, in memory) | `auth.go` |
-| Level size / objects / starts | 24..128 / 6 000 / 2..8 | `level.go` |
+| Level size / objects / starts | 24..256 / 20 000 / 2..8 | `level.go` |
 | Custom levels | 50 per user, 5 000 total | `store.go` |
 | Saved games | `game.maxSavesPerUser` (20; 0 disables) per user, 8 MiB each | `store/admin.go` |
 | Save rate | 1 per 10 s, burst 2, per connection | `hub.go` |

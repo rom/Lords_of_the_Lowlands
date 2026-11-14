@@ -306,12 +306,18 @@ Every second (`think`) it runs four planners:
 | economy | keeps up to `14 + 3·age` workers (max 45); target split F/W/S/G = 45/35/10/10 (50/38/12/0 before Copper, 35/25/10/18/12 incl. energy from Industrial); idle workers go to the most under-staffed resource; every 5th `think` (every 5 s) one worker moves from the most over-stocked to the scarcest resource; food prefers free farms, then hunting/foraging within 26 tiles, then new farms |
 | construction | houses when within 6 of the cap; drop-off camps when a resource is > 9 tiles from one; a fixed build plan (barracks, range, academy, stable, workshop, tower, generator, then second barracks/range/stable) gated by age and worker count; more farms when wild food runs out |
 | research | advance the age when it has ≥ `10 + age` workers and can pay; otherwise academy techs in the order gather → attack → armor → hp, keeping half the next age cost in reserve |
-| military | trains the best unit at every military building (≤ 2 queued), saving for the next age once a minimum army exists; defends against visible enemies within 14 tiles of its town centre; after `FirstAttack` minutes, when the army reaches the attack size (+ age/2), it stages at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; when the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2 |
+| military | trains the best unit at every military building (≤ 2 queued). It keeps a standing army of `4 + age/3 + minutes/4` (capped at the attack size) and only then saves for the next age, unless the advance is already 60 % paid. Defends against visible enemies within 14 tiles of its town centre with every soldier not out on an attack. After `FirstAttack` minutes, when the army reaches the attack size (`AttackSize` + age/2, minus 1 per 3 minutes after minute 40, at least 6), it commits exactly those units as a **wave** (`AI.wave`), stages them at 55 % of the way to the nearest enemy building (town centres preferred) for 30 s, then attack-moves; recruits wait at home for the next wave. When the wave falls below a third it regroups at home and waits 60 s; each wave raises the next attack size by 2. Once no enemy town centre is left, all soldiers join the wave (mop-up) |
+| fleet (`fleet`) | warships are steered separately from the land army: idle ships attack-move to the nearest enemy ship or fishing boat (preferred, distance halved) or to any enemy within 4 tiles of open water |
 
 | naval (`naval`) | only if `Game.Naval` and the dock's age is reached: builds one dock on the nearest explored water tile within 30 tiles of the town centre (needs ≥ 8 workers; at most one dock placement per 40 s); trains fishing boats up to `3 + age/3`, then warships when it has > 4 military units and half the next age cost; sends idle boats to the nearest fish within 40 tiles |
 
 If its town centre is lost the AI tries to rebuild one with any surviving
-worker. In campaign quick games all AI opponents share team 2 against the
+worker.
+
+Attack-moves (and moves) aimed at a tile nobody can stand on — the centre of
+a building, a forest, a cliff — path to the nearest ring (up to 6 tiles) that
+can be stood on (`findPath`). Previously such orders found no path at all,
+which left whole armies standing still in front of an enemy town centre. In campaign quick games all AI opponents share team 2 against the
 human on team 1.
 
 ## 8. Fog of war and visibility
@@ -347,7 +353,7 @@ last-seen copy. See [security.md](security.md#38-known-limitations).
 | Graph | tile grid, 8-connected; diagonal moves forbidden if either orthogonal neighbour is blocked (no corner cutting) |
 | Cost | 1 orthogonal, √2 diagonal, × 1.3 on fords (`TShallow`) |
 | Search | A* with a binary heap and `heap.Fix` decrease-key; weighted heuristic `1.2 × octile distance` to a goal **rectangle** |
-| Effort bound | at most 4 000 expansions per request (`maxExpand`); if the goal is not reached the path leads to the closest tile found |
+| Effort bound | at most max(4 000, map area / 6) expansions per request (`expandBudget`, e.g. ≈ 10 900 on 256×256); if the goal is not reached the path leads to the closest tile found |
 | Goals | rectangles: the ring around a building, the 3×3 around a blocking resource, a single tile for moves; goal tiles may be entered even if occupied by the target |
 | Memory | per-game scratch arrays (`pathG`, `pathFrom`, generation-stamped marks) reused across searches — no per-search allocation of `W·H` arrays |
 | Smoothing | greedy line-of-sight pruning over a window of 24 waypoints; `lineClear` samples 3 points per tile with a ±0.3 box for unit radius |
@@ -361,7 +367,9 @@ last-seen copy. See [security.md](security.md#38-known-limitations).
 At game start each human receives one `start` message containing the
 static `MapView` (dimensions, tiles as a string of digits `'0'..'6'`,
 theme, objective). Thereafter every tick (10 Hz) each human receives a
-**full, per-player snapshot** — not a delta:
+per-player snapshot. Units, buildings and state are always complete;
+**resources** (trees, mines, bushes — most of a large map's entities, and
+almost static) are delta-encoded (`Game.SnapshotDelta`):
 
 | Field | Content |
 |---|---|
@@ -372,6 +380,13 @@ theme, objective). Thereafter every tick (10 Hz) each human receives a
 | `fog` | run-length-encoded visibility, **only every 5th tick** (`Tick % 5 == 1`) |
 | `players` | public per-player info (name, team, colour, AI, age, defeated, score) |
 | `over`, `winner` | end state |
+| `key` | keyframe: `ents` lists every resource the player knows. Sent every 50 ticks (5 s, `keyframeTicks`) and as the first snapshot a client gets for a game (`Client.keyedFor`) |
+| `gone` | in deltas: ids of resources used up this tick |
+
+In a delta, a resource is listed only if it appeared or its amount changed
+this tick, or if it is currently in the player's sight (so newly explored
+resources appear at once). The client keeps unlisted resources between
+keyframes, drops `gone` ones, and on a keyframe removes anything not listed.
 
 Bandwidth techniques:
 
@@ -386,10 +401,13 @@ Bandwidth techniques:
    repetition (e.g. static resources).
 4. **Lossy delivery** — snapshots are enqueued with `lossy=true`; when a
    client's 256-message queue is full the snapshot is dropped and the next
-   one supersedes it. Full (non-delta) snapshots make drops harmless.
+   one supersedes it. Units and buildings are always complete, so drops are
+   harmless; a dropped resource change is repaired by the next keyframe.
+5. **Resource deltas** — see `key` / `gone` above.
 
-Measured uncompressed size: about 6 KB per snapshot on a 56×56 campaign map
-at game start (mostly trees and other resources); the wire size after
+Measured uncompressed sizes of a spectator snapshot (everything visible):
+85 KB keyframe vs 15 KB delta on 84×84; 1 MB keyframe vs 15 KB delta on
+192×192. Player snapshots early in a game are 6–12 KB; the wire size after
 deflate is much smaller.
 
 The client keeps an entity map keyed by id, records the previous rendered
@@ -471,12 +489,12 @@ A level is a JSON-serialised `game.Level`:
 | `id` | string | `campaign-NN`, `u-<16 hex>` (custom) or empty (new) |
 | `name`, `description`, `author` | string | cleaned text (see limits) |
 | `theme` | string | `temperate, desert, winter, tropical, moon, mars, space` |
-| `width`, `height` | int | 24..128 |
+| `width`, `height` | int | 24..256 |
 | `startAge`, `maxAge` | int | 0..16, `maxAge ≥ startAge` |
 | `objective` | `{type, minutes?}` | `conquest`, `survive` (1..120 min), `advance` |
 | `startRes` | `[5]float` | 0..100 000 each; all zero → defaults |
 | `tiles` | string | `width·height` digits `'0'..'6'` (row-major) |
-| `objects` | `[{k,x,y}]` | ≤ 6 000; kinds `tree, berry, gold, stone, crystal, fish, deer, boar, mammoth` |
+| `objects` | `[{k,x,y}]` | ≤ 20 000; kinds `tree, berry, gold, stone, crystal, fish, deer, boar, mammoth` |
 | `starts` | `[{x,y}]` | 2..8 start positions |
 | `maxPlayers` | int | derived from `len(starts)` |
 | `opponents` | int | default AI count for quick play |

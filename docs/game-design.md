@@ -28,7 +28,14 @@ flowchart LR
 - **Advancing an age** at the town centre unlocks the next unit of every
   line, new buildings and technologies and restyles your whole civilisation.
 - **Win** by the level's objective: conquest, survival or being first to
-  advance.
+  advance. In a conquest a player is out once they have no land units and no
+  buildings other than houses and farms left — surviving ships alone do not
+  keep a player in the game.
+- **Plan** with your own tech tree (`F2`, `Y` or the *Tech Tree* button): one
+  column per age, rows for the age advance, buildings, every unit line and
+  every technology line, coloured by status (done, available now, in
+  progress, later age, not on this map). Clicking an available technology
+  researches it at your least busy academy.
 
 ## Resources
 
@@ -385,23 +392,23 @@ difficulty in the campaign screen.
 
 | # | Level | Theme | Map type | Ages | Map | Objective | AI | Difficulty |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **The First Fire** | temperate | inland | Dawn Age → Neolithic Age | 56² | Conquest — defeat every opponent | 1 | easy |
-| 2 | **Valley of Plenty** | temperate | riverland | Neolithic Age → Copper Age | 60² | Advance — be first to reach the final age | 1 | easy |
-| 3 | **Gift of the River** | desert | riverland | Copper Age → Bronze Age | 64² | Conquest — defeat every opponent | 2 | easy |
-| 4 | **The Sea Peoples** | tropical | coastal | Bronze Age → Iron Age | 64² | Survive — hold out 15 min | 2 | normal |
-| 5 | **Iron and Ice** | winter | coastal | Iron Age → Classical Age | 68² | Conquest — defeat every opponent | 1 | normal |
-| 6 | **Phalanx** | desert | coastal | Classical Age → Early Middle Ages | 68² | Conquest — defeat every opponent | 1 | normal |
-| 7 | **Shield Wall** | temperate | riverland | Early Middle Ages → High Middle Ages | 72² | Conquest — defeat every opponent | 2 | normal |
-| 8 | **Lords of the Lowlands** | temperate | coastal | High Middle Ages → Renaissance | 76² | Conquest — defeat every opponent | 2 | normal |
-| 9 | **Pike and Shot** | temperate | inland | Renaissance → Imperial Age | 76² | Conquest — defeat every opponent | 1 | hard |
-| 10 | **A New World** | tropical | coastal | Imperial Age → Industrial Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 11 | **The Iron Horse** | temperate | inland | Industrial Age → Machine Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 12 | **No Man's Land** | winter | inland | Machine Age → Atomic Age | 80² | Survive — hold out 20 min | 2 | hard |
-| 13 | **Iron Curtain** | winter | lakes | Atomic Age → Information Age | 88² | Conquest — defeat every opponent | 3 | normal |
-| 14 | **Silicon Frontier** | desert | desert | Information Age → Orbital Age | 88² | Conquest — defeat every opponent | 2 | hard |
-| 15 | **Sea of Tranquility** | moon | inland | Orbital Age → Interplanetary Age | 84² | Conquest — defeat every opponent | 2 | hard |
-| 16 | **Red Planet** | mars | inland | Interplanetary Age → Interstellar Age | 92² | Conquest — defeat every opponent | 2 | hard |
-| 17 | **Battle for the Stars** | space | inland | Interstellar Age | 96² | Conquest — defeat every opponent | 3 | hard |
+| 1 | **The First Fire** | temperate | inland | Dawn Age → Neolithic Age | 84² | Conquest — defeat every opponent | 1 | easy |
+| 2 | **Valley of Plenty** | temperate | riverland | Neolithic Age → Copper Age | 88² | Advance — be first to reach the final age | 1 | easy |
+| 3 | **Gift of the River** | desert | riverland | Copper Age → Bronze Age | 96² | Conquest — defeat every opponent | 2 | easy |
+| 4 | **The Sea Peoples** | tropical | coastal | Bronze Age → Iron Age | 96² | Survive — hold out 15 min | 2 | normal |
+| 5 | **Iron and Ice** | winter | coastal | Iron Age → Classical Age | 104² | Conquest — defeat every opponent | 1 | normal |
+| 6 | **Phalanx** | desert | coastal | Classical Age → Early Middle Ages | 104² | Conquest — defeat every opponent | 1 | normal |
+| 7 | **Shield Wall** | temperate | riverland | Early Middle Ages → High Middle Ages | 108² | Conquest — defeat every opponent | 2 | normal |
+| 8 | **Lords of the Lowlands** | temperate | coastal | High Middle Ages → Renaissance | 112² | Conquest — defeat every opponent | 2 | normal |
+| 9 | **Pike and Shot** | temperate | inland | Renaissance → Imperial Age | 112² | Conquest — defeat every opponent | 1 | hard |
+| 10 | **A New World** | tropical | coastal | Imperial Age → Industrial Age | 120² | Conquest — defeat every opponent | 2 | normal |
+| 11 | **The Iron Horse** | temperate | inland | Industrial Age → Machine Age | 120² | Conquest — defeat every opponent | 2 | normal |
+| 12 | **No Man's Land** | winter | inland | Machine Age → Atomic Age | 120² | Survive — hold out 20 min | 2 | hard |
+| 13 | **Iron Curtain** | winter | lakes | Atomic Age → Information Age | 132² | Conquest — defeat every opponent | 3 | normal |
+| 14 | **Silicon Frontier** | desert | desert | Information Age → Orbital Age | 132² | Conquest — defeat every opponent | 2 | hard |
+| 15 | **Sea of Tranquility** | moon | inland | Orbital Age → Interplanetary Age | 128² | Conquest — defeat every opponent | 2 | hard |
+| 16 | **Red Planet** | mars | inland | Interplanetary Age → Interstellar Age | 136² | Conquest — defeat every opponent | 2 | hard |
+| 17 | **Battle for the Stars** | space | inland | Interstellar Age | 144² | Conquest — defeat every opponent | 3 | hard |
 
 1. **The First Fire** — 300,000 years ago a band huddles around the first fire. Hunt mammoth and deer, gather berries and drive the rival clan from the valley. Discover farming to enter the Neolithic.
 2. **Valley of Plenty** — The ice retreats and wild grain covers the valley. Be the first tribe to master copper and enter the Copper Age.
@@ -425,6 +432,19 @@ Progress (highest campaign level won) and high scores are stored for
 registered players; guests can play everything but are not recorded.
 
 ## Skirmish and multiplayer
+
+**Map size** can be chosen whenever a game is started — on the campaign screen
+(default: the chapter's own size), in skirmish (default Normal) and when
+creating a lobby battle:
+
+| Preset | Mini | Tiny | Small | Normal | Large | Very large | Huge | Enormous |
+|---|---|---|---|---|---|---|---|---|
+| Tiles per side | 48 | 64 | 80 | 112 | 144 | 176 | 208 | 256 |
+
+Resources and forests scale with the area; each player's starting resources
+are the same on every size. Small maps mean early contact and rushes, large ones
+long build-ups, scouting and naval play. Hand-drawn custom levels keep their
+own size.
 
 - **Skirmish vs computer**: random map (theme, map type, size 56–120, water
   amount, start/final age, 1–7 opponents, difficulty) or any campaign/custom
@@ -482,9 +502,18 @@ Six difficulty levels:
 same rules as you — it pays for everything and obeys the population cap; up
 to *hard* it sees only what its units see. It attacks in waves, gathers its
 army half-way before striking, retreats to regroup when a wave is spent and
-grows each subsequent wave by two. It defends its town centre against
-intruders and rebuilds it if it falls. On naval maps it builds a dock,
-fishes and later trains warships.
+grows each subsequent wave by two. Soldiers trained during an attack wait at
+home for the next, larger wave instead of trickling into enemy towers; once
+every enemy town centre has fallen, everyone joins in to finish the game.
+It keeps a growing standing army while saving for the next age, and after 40
+minutes it attacks with ever smaller armies, so long games do not stall. It
+defends its town centre against intruders and rebuilds it if it falls. On
+naval maps it builds a dock, fishes and later trains warships, which hunt
+enemy ships, fishing boats and anything on a shore.
+
+In simulated computer-vs-computer games (2 players, 64×64 to 208×208, every
+map type, normal to insane) a winner is decided in 25–80 minutes; super-easy
+computers, which attack late with large armies, take longer.
 
 ## Scoring
 
@@ -499,15 +528,23 @@ top 25 scores of each level.
 
 ## Controls (summary)
 
+The complete list lives in one table (`SHORTCUTS` in `web/js/game.js`) and is shown in game with `?` / `F1`.
+
 | Input | Action |
 |---|---|
 | Left click / drag | select / box-select |
 | Right click | context command: move, attack, gather, build/repair, set rally point (buildings) |
-| Attack-move button / key | move and fight anything on the way |
-| Ctrl + 0–9, 0–9 | set / recall control groups |
-| H / . | select town centre / next idle worker |
-| Esc | cancel placement or attack-move |
-| Shift-click train | queue five |
-| Arrow keys, screen edges, minimap | scroll camera; wheel zooms |
+| A / S / Del | attack-move / stop / delete (buildings confirm in an in-game dialog) |
+| Q W E R T … | command buttons in panel order; Shift + train key queues five |
+| Shift + E G L N F D C P B R S K Y T | place a building directly while workers are selected |
+| Ctrl+1–9, Shift+1–9, 1–9 | set / add to / recall control groups |
+| H (Shift+H) / . / , | town centre (cycle) / next idle worker / next idle soldier; Ctrl selects all idle |
+| M / Ctrl+A | all military / all units |
+| Esc | cancel placement or attack-move, back, close window, clear selection |
+| Arrow keys, screen edges, minimap | scroll camera; wheel or + / − zooms, 0 resets |
+| Space / Backspace | jump to last attack alert / centre on selection |
 | Enter / Tab | open chat / switch channel (All, Team, Global) |
-| F10 | game menu (resign) |
+| F10 / Ctrl+S / Shift+M / ? or F1 | game menu / quick save / mute / shortcut help |
+| F2 or Y | your tech tree |
+
+Editor: 1–7 terrain, Shift+1–9 objects, E eraser, P start position, [ ] brush size, G grid, N new, Ctrl+Z undo, Ctrl+S save, ? help.

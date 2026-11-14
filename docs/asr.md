@@ -100,7 +100,7 @@ distroless/read-only containers.
 |---|---|
 | Source | room loop ticker |
 | Stimulus | 100 ms tick |
-| Environment | normal load: ≤ 200 rooms, up to 8 players and 200 population each on ≤ 128×128 maps |
+| Environment | normal load: ≤ 200 rooms, up to 8 players and 200 population each on ≤ 256×256 maps |
 | Artifact | `Room.tick` → `Game.Step` |
 | Response | tick completes and snapshots are queued |
 | Measure | `Step` + snapshots take well under 100 ms (target < 10 ms per room at typical sizes; benchmark with `go test -bench`); `time.Ticker` drops ticks rather than piling up under overload |

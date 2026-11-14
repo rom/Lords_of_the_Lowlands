@@ -663,9 +663,11 @@ func TestQuickGameAndScores(t *testing.T) {
 	}
 	// campaign quick game; second login from another window kicks the first
 	c.send(map[string]string{"t": "leave"})
-	c.send(map[string]interface{}{"t": "quick", "level": "campaign-01", "opp": 5})
+	c.send(map[string]interface{}{"t": "quick", "level": "campaign-01", "opp": 5, "mapSize": "tiny"})
 	if m := c.expectAny("start", "error"); m["t"] != "start" {
 		t.Fatal(m)
+	} else if w := m["level"].(map[string]interface{})["width"]; w != float64(64) {
+		t.Fatalf("map size preset not applied: width %v", w)
 	}
 	c2 := &client{e: e, hc: c.hc, ctx: context.Background()}
 	c2.dial()
@@ -763,6 +765,7 @@ func TestParseClientMsg(t *testing.T) {
 		`{"t":"ping"}`, `{"t":"chat","ch":"global","text":"hi"}`, `{"t":"chat","ch":"whisper","to":"a","text":"hi"}`,
 		`{"t":"create","level":"campaign-01"}`, `{"t":"slot","slot":1,"kind":"ai","diff":"hard"}`,
 		`{"t":"cmd","cmd":{"c":"move","ids":[1,2],"x":3,"y":4}}`, `{"t":"quick","skirmish":{"size":64,"startAge":1,"maxAge":2}}`,
+		`{"t":"quick","level":"campaign-01","mapSize":"enormous"}`, `{"t":"create","level":"campaign-02","mapSize":"mini"}`,
 	}
 	for _, s := range ok {
 		if _, err := ParseClientMsg([]byte(s)); err != nil {
@@ -774,7 +777,7 @@ func TestParseClientMsg(t *testing.T) {
 		`{"t":"ping","room":"` + strings.Repeat("r", 40) + `"}`, `{"t":"chat","ch":"global","text":"\u0000"}`,
 		`{"t":"chat","ch":"pirate","text":"arr"}`, `{"t":"chat","ch":"whisper","text":"hi"}`,
 		`{"t":"slot","kind":"wizard"}`, `{"t":"cmd"}`, `{"t":"cmd","cmd":{"c":"x","w":"<script>"}}`,
-		`{"t":"quick","skirmish":{"size":9999}}`, `{"t":"cmd","cmd":{"ids":[` + strings.Repeat("1,", 200) + `1]}}`,
+		`{"t":"quick","skirmish":{"size":9999}}`, `{"t":"quick","mapSize":"colossal"}`, `{"t":"cmd","cmd":{"ids":[` + strings.Repeat("1,", 200) + `1]}}`,
 		`{"t":"ping","x":"` + strings.Repeat("a", MaxMessageBytes) + `"}`,
 	}
 	for _, s := range bad {

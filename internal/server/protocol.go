@@ -40,6 +40,8 @@ type ClientMsg struct {
 	Opp      int                     `json:"opp,omitempty"`
 	Cmd      *game.Command           `json:"cmd,omitempty"`
 	Skirmish *levels.SkirmishOptions `json:"skirmish,omitempty"`
+	// MapSize is a size preset id (levels.MapSizes); empty keeps the level's size.
+	MapSize string `json:"mapSize,omitempty"`
 	// Signed command: payload P (JSON of a game.Command), sequence N and
 	// HMAC Mac over "N:P" with the per-connection key.
 	P   string `json:"p,omitempty"`
@@ -77,6 +79,9 @@ func ParseClientMsg(b []byte) (*ClientMsg, error) {
 	}
 	if m.Team < 0 || m.Team > 8 || m.Slot < 0 || m.Slot >= game.MaxPlayers || m.Opp < 0 || m.Opp > 7 {
 		return nil, errors.New("value out of range")
+	}
+	if _, ok := levels.SizeTiles(m.MapSize); !ok {
+		return nil, errors.New("unknown map size")
 	}
 	if len(m.Room) > 32 || len(m.Level) > 64 || len(m.To) > 32 {
 		return nil, errors.New("field too long")

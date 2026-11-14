@@ -735,11 +735,12 @@ type Defs struct {
 	Resources     map[string]*ResourceDef      `json:"resources"`
 	UnitLine      map[string][]string          `json:"unitLine"`
 	ResNames      [NumRes]string               `json:"resNames"`
+	MapSizes      []MapSize                    `json:"mapSizes"`
 }
 
 // AllDefs returns the static definitions.
 func AllDefs() *Defs {
-	return &Defs{Ages, Units, Buildings, BuildingNames(), Techs, Resources, UnitLine, ResNames}
+	return &Defs{Ages, Units, Buildings, BuildingNames(), Techs, Resources, UnitLine, ResNames, MapSizes}
 }
 
 // SortedTechs returns tech ids available at the given age, sorted.

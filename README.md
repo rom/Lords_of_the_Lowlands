@@ -20,6 +20,8 @@ effect and piece of music is generated procedurally at runtime.
 - **17-chapter campaign** (≥ 15 levels as required). Each chapter starts in one age and lets you advance to
   the next, with conquest, survival and "advance first" objectives, on temperate, desert, winter, tropical,
   lunar, Martian and deep-space maps.
+- **Eight map sizes** — mini (48×48) to enormous (256×256), selectable for campaign chapters,
+  skirmish and lobby battles.
 - **Six map types** — inland, coastal, riverland, lakes, desert and highland. They change the terrain, the
   farm yield (desert 60 %, riverland 115 %) and the tech tree (irrigation, qanats, fishing nets, navigation,
   steam ships, deep mining, terrace farming, caravans).
@@ -59,9 +61,15 @@ effect and piece of music is generated procedurally at runtime.
   shore depth), animated water, rocks, procedurally drawn buildings for ten architectural eras, walking/
   fighting/working animations, projectiles, muzzle flashes, explosions, smoke, fire and dust particles,
   soft fog of war, minimap and vignette lighting.
-- **Sound** — Web Audio synthesised effects (axes, pickaxes, hammers, clashing steel, arrows, muskets,
-  cannon, lasers, plasma, explosions, horns) with stereo panning, and generative background music whose
-  mode, tempo and instruments change with the age.
+- **Sound** — Web Audio synthesised effects with stereo panning and reverb, varied on every play and
+  matched to the era: axes become chainsaws and plasma cutters, pickaxes become pneumatic drills,
+  scythes become tractors; gold rings brighter than stone, crystals chime, fish splash, berries rustle.
+  Combat has clashing and parried steel, bow twangs, muskets, cannon, lasers and plasma, plus a
+  separate sound for each projectile landing (arrow thunk, ricochet, blast), groans of the fallen and
+  crumbling buildings. "Under attack" alarms follow the age — war drums and horns, church bells,
+  bugle and drum roll, air-raid siren, starship klaxon — and a building under attack sounds different
+  from units and is named in the warning. Generative background music changes mode, tempo and
+  instruments with the age.
 - **Security** — strict CSP, CSRF protection, Argon2id, TOTP MFA, audit log, rate limiting, fog-filtered
   snapshots (no map hacks), server-authoritative commands, plus an OS sandbox with **seccomp-BPF, Landlock,
   capability dropping, no_new_privs**, a hardened **systemd** unit and an **SELinux** policy module.
@@ -157,16 +165,22 @@ Set `metrics.token` (≥ 16 characters) and scrape with `Authorization: Bearer <
 
 ## How to play
 
+Press **`?`** (or `F1`, or the **?** button) in a game for the full shortcut sheet; the level editor has its own (`?` there too).
+
 | Action | Control |
 |---|---|
 | Select / box select | left click / drag (Shift adds, double-click selects all of a type) |
 | Move, gather, build, attack, repair | right click (context-sensitive) |
-| Attack-move / stop / delete | `A` + click / `S` / `Del` |
-| Build menu & production | buttons bottom right (hotkeys `Q W E R T …`) |
-| Town centre / idle worker | `H` / `.` |
-| Control groups | `Ctrl+1…9`, recall `1…9` (double tap to centre) |
-| Camera | arrow keys, screen edge, minimap, mouse wheel to zoom |
+| Attack-move / stop / delete | `A` + click / `S` / `Del` (buildings ask for confirmation) |
+| Build menu & production | buttons bottom right (hotkeys `Q W E R T …`, shown on each button; `Shift` + train key = 5) |
+| Build directly (workers selected) | `Shift+E` house, `G` granary, `L` lumber camp, `N` mining camp, `F` farm, `D` dock, `C` town centre, `P` generator, `B` barracks, `R` range, `S` stable, `K` workshop, `Y` academy, `T` tower |
+| Town centre / idle worker / idle soldier | `H` (`Shift+H` cycles) / `.` / `,` (`Ctrl` selects all idle) |
+| Select all military / all units | `M` / `Ctrl+A` |
+| Control groups | `Ctrl+1…9` set, `Shift+1…9` add, `1…9` recall (double tap to centre) |
+| Camera | arrow keys, screen edge, minimap, wheel or `+`/`-` to zoom, `0` reset, `Space` last alert, `Backspace` selection |
 | Chat | `Enter`, `Tab` switches All / Team / Global |
+| Menu / quick save / mute / help | `F10` / `Ctrl+S` / `Shift+M` / `?` |
+| Your tech tree (click a tech to research it) | `F2` / `Y` / *Tech Tree* button |
 
 Gather food and wood early, build houses before you are housed, add drop-off camps near resources,
 research at the academy, and save up to **advance the age** at the town centre — every age unlocks
