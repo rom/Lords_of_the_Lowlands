@@ -1,0 +1,44 @@
+# Example deployment of Lords of the Lowlands with Docker Compose.
+#
+#   docker compose up -d --build
+#   open http://localhost:8080/
+#
+# The container is read-only, has no capabilities and cannot gain
+# privileges; the only writable path is the named volume on /data.
+
+services:
+  lotl:
+    build: .
+    image: lotl:latest
+    restart: unless-stopped
+    ports:
+      # host:container. To change the host port edit the left side only;
+      # the server inside always listens on 8080 (see Dockerfile ENTRYPOINT).
+      - "8080:8080"
+    volumes:
+      - lotl-data:/data
+    # Extra flags are appended to the ENTRYPOINT. Behind a TLS-terminating
+    # proxy use: ["-secure-cookies", "-trust-proxy"]
+    command: ["-log-level", "info"]
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      # The default seccomp profile permits seccomp(2) and, on current
+      # Docker versions, the Landlock calls used by the in-process sandbox.
+    pids_limit: 256
+    mem_limit: 1g
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+      core: 0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lotl-data:

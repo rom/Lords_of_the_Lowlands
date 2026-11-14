@@ -1,0 +1,154 @@
+# Lords of the Lowlands game server - hardened systemd service.
+#
+# Install:   deploy/install.sh   (or copy to /etc/systemd/system/)
+# Verify:    systemd-analyze security lotl.service
+#
+# Two ways to choose the listening port:
+#
+#   1. Socket activation (recommended). lotl.socket binds the port (as root,
+#      so ports < 1024 work without giving the server any capability) and
+#      hands the listening socket over as fd 3. Change the port with
+#      `systemctl edit lotl.socket`. -listen/-port/LOTL_PORT are ignored then.
+#
+#   2. Direct bind. Mask the socket (`systemctl mask --now lotl.socket`) and
+#      set LOTL_LISTEN / LOTL_PORT in /etc/lotl/lotl.env. For ports < 1024
+#      in this mode see the CAP_NET_BIND_SERVICE notes further down.
+#
+# The server additionally confines itself after binding (internal/hardening):
+# no_new_privs, non-dumpable, RLIMIT_CORE=0, umask 077, all capabilities
+# dropped, Landlock (write access only below the data directory, TCP bind
+# only to the listening port, no outbound TCP connect) and its own seccomp
+# denylist. The directives below are an independent, outer layer.
+
+[Unit]
+Description=Lords of the Lowlands real-time strategy game server
+Documentation=file:///usr/local/share/doc/lotl/operations.md
+After=network.target
+
+[Service]
+Type=simple
+# -data is pinned to the StateDirectory; everything else comes from the
+# environment file. LOTL_OPTS carries flags without an env equivalent,
+# e.g. LOTL_OPTS="-secure-cookies -trust-proxy -log-level debug".
+EnvironmentFile=-/etc/lotl/lotl.env
+Environment=LOTL_DATA=/var/lib/lotl
+# Landlock denies reading /etc/localtime after start-up; TZ=UTC makes the Go
+# runtime use UTC without touching the file system (logs are UTC anyway).
+Environment=TZ=UTC
+ExecStart=/usr/local/bin/lotl-server -data /var/lib/lotl $LOTL_OPTS
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=20s
+# SIGTERM triggers a graceful shutdown (games stopped, 10 s HTTP drain).
+KillSignal=SIGTERM
+
+# --- identity -------------------------------------------------------------
+# A transient UID/GID allocated at start. Alternatively create a system
+# user (`useradd -r -s /usr/sbin/nologin -d /var/lib/lotl lotl`), comment
+# DynamicUser and set User=lotl / Group=lotl.
+DynamicUser=yes
+#User=lotl
+#Group=lotl
+# /var/lib/lotl (-> /var/lib/private/lotl with DynamicUser), mode 0700.
+StateDirectory=lotl
+StateDirectoryMode=0700
+UMask=0077
+
+# --- privileges -----------------------------------------------------------
+NoNewPrivileges=yes
+# No capabilities at all. Socket activation makes CAP_NET_BIND_SERVICE
+# unnecessary even for port 80/443.
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Direct-bind mode on a port < 1024 only (and then also set PrivateUsers=no,
+# because capabilities inside a private user namespace do not count for the
+# host network namespace). The server drops the capability itself right
+# after binding.
+#CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+SecureBits=noroot-locked
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Pure Go (CGO_ENABLED=0) never needs writable+executable memory.
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+KeyringMode=private
+
+# --- file system ----------------------------------------------------------
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+# Note: /proc/sys is hidden, so Go falls back to SOMAXCONN for the listen
+# backlog in direct-bind mode; with socket activation use Backlog= in
+# lotl.socket instead.
+ProcSubset=pid
+# Only the state directory is writable (implied by ProtectSystem=strict plus
+# StateDirectory=); make TLS material readable without exposing /etc/lotl
+# to anything else. Optionally use systemd credentials for the key:
+#LoadCredential=tls.crt:/etc/lotl/tls.crt
+#LoadCredential=tls.key:/etc/lotl/tls.key
+#Environment=LOTL_TLS_CERT=%d/tls.crt LOTL_TLS_KEY=%d/tls.key
+InaccessiblePaths=-/boot -/var/log
+# Nothing but the server binary's directory is executable (the binary is
+# static, so no dynamic loader or libraries are needed). Adjust if you
+# install elsewhere.
+NoExecPaths=/
+ExecPaths=/usr/local/bin
+
+# --- network --------------------------------------------------------------
+# AF_UNIX is needed for the journal stream on stderr.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# The game server never connects out. With socket activation these also
+# apply to the socket unit's traffic; restrict the client range if the game
+# is only meant for a LAN, e.g.:
+#IPAddressDeny=any
+#IPAddressAllow=localhost 10.0.0.0/8 192.168.0.0/16
+# Behind a reverse proxy on the same host:
+#IPAddressDeny=any
+#IPAddressAllow=localhost
+
+# --- system calls ---------------------------------------------------------
+SystemCallArchitectures=native
+# Allow-list: the usual service set ...
+SystemCallFilter=@system-service
+# ... minus privileged and resource-altering calls (setrlimit is removed;
+# Go uses prlimit64, which is in @default) ...
+SystemCallFilter=~@privileged @resources @mount @debug @cpu-emulation @obsolete @raw-io @reboot @swap @module @clock
+# ... plus what the in-process hardening needs: seccomp(2) and the Landlock
+# calls (group @sandbox) and capset(2) (part of @privileged, re-added here
+# so that DropCapabilities can clear the capability sets).
+SystemCallFilter=@sandbox capset
+# Fail filtered calls with EPERM instead of killing the process, so that an
+# unexpected call shows up as an error in the log rather than a crash.
+SystemCallErrorNumber=EPERM
+
+# --- resources ------------------------------------------------------------
+# Each room runs one goroutine; 200 rooms (-max-rooms) and a few hundred
+# WebSocket clients fit comfortably in these limits.
+MemoryMax=1G
+MemoryHigh=768M
+TasksMax=256
+LimitNOFILE=8192
+LimitCORE=0
+#CPUQuota=200%
+
+# --- SELinux --------------------------------------------------------------
+# With the policy module from deploy/selinux loaded, systemd transitions to
+# lotl_t automatically via the lotl_exec_t entrypoint label of the binary.
+# Forcing the context is only needed when the binary lives elsewhere:
+#SELinuxContext=system_u:system_r:lotl_t:s0
+
+[Install]
+WantedBy=multi-user.target
+Also=lotl.socket

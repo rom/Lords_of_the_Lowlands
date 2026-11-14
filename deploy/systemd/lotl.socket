@@ -1,0 +1,33 @@
+# Socket activation for lotl.service.
+#
+# systemd (not the game server) binds the port, so any port - including
+# 80 or 443 - works without granting the server CAP_NET_BIND_SERVICE.
+# lotl-server accepts exactly one inherited socket (LISTEN_FDS=1, fd 3);
+# do not add a second ListenStream= line.
+#
+# Change the port with a drop-in:
+#   systemctl edit lotl.socket
+#     [Socket]
+#     ListenStream=
+#     ListenStream=0.0.0.0:9000
+#   systemctl restart lotl.socket lotl.service
+# (On SELinux systems also label the new port:
+#   semanage port -a -t lotl_port_t -p tcp 9000)
+
+[Unit]
+Description=Lords of the Lowlands game server socket
+
+[Socket]
+# Port only: listens on all IPv4 and IPv6 addresses (dual stack).
+# Use 127.0.0.1:8080 behind a local reverse proxy.
+ListenStream=8080
+BindIPv6Only=both
+Backlog=512
+NoDelay=true
+# One long-running server process accepts all connections itself.
+Accept=no
+# Optional: bound concurrent connections per source address is not
+# available for Accept=no; use a reverse proxy or firewall for that.
+
+[Install]
+WantedBy=sockets.target
