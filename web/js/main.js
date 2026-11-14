@@ -17,12 +17,12 @@ class App {
     this.room = null;
     this.net = new Net((m) => this.onMsg(m), (s) => this.onNetState(s));
     this.bindUI();
-    this.backdrop();
     this.boot();
   }
 
   async boot() {
     try { this.defs = await api('/api/defs'); } catch (e) { $('#autherr').textContent = 'Server unavailable'; }
+    if (this.defs) this.backdrop();
     try { this.me = await api('/api/me'); } catch (e) { this.me = null; }
     if (this.me) this.loggedIn(); else this.show('login');
   }
