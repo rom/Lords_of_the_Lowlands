@@ -59,9 +59,15 @@ effect and piece of music is generated procedurally at runtime.
   shore depth), animated water, rocks, procedurally drawn buildings for ten architectural eras, walking/
   fighting/working animations, projectiles, muzzle flashes, explosions, smoke, fire and dust particles,
   soft fog of war, minimap and vignette lighting.
-- **Sound** — Web Audio synthesised effects (axes, pickaxes, hammers, clashing steel, arrows, muskets,
-  cannon, lasers, plasma, explosions, horns) with stereo panning, and generative background music whose
-  mode, tempo and instruments change with the age.
+- **Sound** — Web Audio synthesised effects with stereo panning and reverb, varied on every play and
+  matched to the era: axes become chainsaws and plasma cutters, pickaxes become pneumatic drills,
+  scythes become tractors; gold rings brighter than stone, crystals chime, fish splash, berries rustle.
+  Combat has clashing and parried steel, bow twangs, muskets, cannon, lasers and plasma, plus a
+  separate sound for each projectile landing (arrow thunk, ricochet, blast), groans of the fallen and
+  crumbling buildings. "Under attack" alarms follow the age — war drums and horns, church bells,
+  bugle and drum roll, air-raid siren, starship klaxon — and a building under attack sounds different
+  from units and is named in the warning. Generative background music changes mode, tempo and
+  instruments with the age.
 - **Security** — strict CSP, CSRF protection, Argon2id, TOTP MFA, audit log, rate limiting, fog-filtered
   snapshots (no map hacks), server-authoritative commands, plus an OS sandbox with **seccomp-BPF, Landlock,
   capability dropping, no_new_privs**, a hardened **systemd** unit and an **SELinux** policy module.

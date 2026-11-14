@@ -10,6 +10,11 @@ function hkName(k) { return k === 'delete' ? 'Del' : k === 'escape' ? 'Esc' : k.
 const RES_SHORT = ['Food', 'Wood', 'Stone', 'Gold', 'Energy'];
 const ECO = ['house', 'granary', 'lumber_camp', 'mining_camp', 'farm', 'dock', 'town_center', 'generator'];
 const MIL = ['barracks', 'range', 'stable', 'workshop', 'academy', 'tower'];
+// sound of gathering each resource
+const WORK_SFX = { tree: 'chop', stone: 'mine', gold: 'mineGold', crystal: 'mineCrystal', berry: 'forage', farm: 'farm', fish: 'fish', carcass: 'butcher' };
+// sound of each projectile hitting
+const IMPACT_SFX = { arrow: 'impactWood', bolt: 'impactWood', stone: 'impactFlesh', boulder: 'impactBlast', grenade: 'impactBlast',
+  cannonball: 'impactBlast', shell: 'impactBlast', rocket: 'impactBlast', missile: 'impactBlast', plasma: 'impactEnergy', laser: 'impactEnergy' };
 const KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
 // Direct build hotkeys (Shift + letter) while workers are selected.
 const BUILD_KEYS = { e: 'house', g: 'granary', l: 'lumber_camp', n: 'mining_camp', f: 'farm', d: 'dock', c: 'town_center', p: 'generator',
@@ -105,6 +110,7 @@ export class GameClient {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.dead = true;
     this.root.classList.remove('spectator');
     for (const [t, f, o] of this.handlers) t.removeEventListener(f, o);
     this.root.classList.add('hidden');
@@ -163,6 +169,18 @@ export class GameClient {
     return this.defs.resources[v.t] || this.defs.resources.carcass;
   }
 
+  // impactLater plays the sound of a projectile landing, when it lands.
+  impactLater(ev, p) {
+    const s = IMPACT_SFX[p] || (p === 'bullet' ? (Math.random() < 0.25 ? 'ricochet' : 'impactFlesh') : 'impactEnergy');
+    const land = () => {
+      if (this.dead) return;
+      const [sx, sy] = this.r.toScreen(ev.tx ?? ev.x, ev.ty ?? ev.y);
+      if (sx < -80 || sx > this.r.W + 80 || sy < -80 || sy > this.r.H + 80) return; // only audible on screen
+      sfx(s, clamp(sx / this.r.W * 2 - 1, -1, 1), 0.5);
+    };
+    setTimeout(land, Math.max(0, (ev.d || 0.2) * 1000));
+  }
+
   onEvent(ev) {
     this.r.addEvent(ev, this.defs);
     const [sx, sy] = this.r.toScreen(ev.x, ev.y);
@@ -170,18 +188,20 @@ export class GameClient {
     const pan = clamp(sx / this.r.W * 2 - 1, -1, 1);
     const vol = on ? 1 : clamp(1 - Math.hypot(sx - this.r.W / 2, sy - this.r.H / 2) / 1500, 0, 0.5);
     const mine = ev.o === this.you;
+    const era = ev.o >= 0 ? (this.defs.ages[this.ageOf(ev.o)] || {}).era : 'stone';
     switch (ev.k) {
       case 'shot': {
         const p = ev.p;
         const s = p === 'arrow' || p === 'bolt' ? 'arrow' : p === 'stone' || p === 'boulder' || p === 'grenade' ? 'sling'
           : p === 'bullet' ? (this.ageOf(ev.o) < 11 ? 'musket' : 'bullet') : p === 'cannonball' || p === 'shell' ? 'cannon'
             : p === 'rocket' || p === 'missile' ? 'rocket' : p === 'plasma' ? 'plasma' : 'laser';
-        sfx(s, pan, vol * 0.7);
+        sfx(s, pan, vol * 0.7, era);
+        this.impactLater(ev, p);
         break;
       }
       case 'melee': sfx(ev.p && (ev.p.startsWith('worker') || this.defs.units[ev.p]?.class === 'animal') ? 'punch' : 'clash', pan, vol * 0.7); break;
-      case 'work': sfx(ev.p === 'tree' ? 'chop' : ev.p === 'gold' || ev.p === 'stone' || ev.p === 'crystal' ? 'mine' : 'forage', pan, vol * 0.45); break;
-      case 'hammer': sfx('hammer', pan, vol * 0.45); break;
+      case 'work': sfx(WORK_SFX[ev.p] || 'forage', pan, vol * 0.45, era); break;
+      case 'hammer': sfx('hammer', pan, vol * 0.45, era); break;
       case 'death': sfx(this.defs.units[ev.p]?.class === 'animal' ? 'animal' : 'death', pan, vol * 0.6); break;
       case 'collapse': sfx('collapse', pan, vol); break;
       case 'boom': sfx('boom', pan, vol * 0.8); break;
@@ -189,7 +209,10 @@ export class GameClient {
       case 'trained': if (mine) sfx('trained', pan, 0.5); break;
       case 'tech': if (mine) { sfx('tech'); this.toast(`Researched ${this.defs.techs[ev.p]?.name || ev.p}`); } break;
       case 'age': if (mine) { sfx('age'); this.toast(`You have advanced to the ${this.defs.ages[ev.d].name}!`, 5000); } else this.toast(`${this.pname(ev.o)} advanced to the ${this.defs.ages[ev.d].name}`); break;
-      case 'alert': if (mine) { sfx('alert'); this.toast('You are under attack!'); this.alertAt = { x: ev.x, y: ev.y }; this.alerts.push({ x: ev.x, y: ev.y, t: performance.now() / 1000 }); } break;
+      case 'alert': if (mine) {
+        sfx(ev.d ? 'alertBuilding' : 'alert', 0, 1, era);
+        const what = ev.p && ev.d ? (this.defs.buildingNames[ev.p]?.[era] || this.defs.buildings[ev.p]?.name) : null;
+        this.toast(what ? `Your ${what} is under attack!` : 'Your units are under attack!'); this.alertAt = { x: ev.x, y: ev.y }; this.alerts.push({ x: ev.x, y: ev.y, t: performance.now() / 1000 }); } break;
       case 'place': if (mine) sfx('place', pan, 0.6); break;
       case 'defeated': this.toast(`${this.pname(ev.o)} has been defeated.`, 5000); break;
     }

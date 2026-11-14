@@ -1216,7 +1216,11 @@ func (g *Game) damage(t *Entity, h pendingHit, mul float64) {
 	t.HP -= dmg
 	if t.Owner >= 0 && g.Tick-g.Players[t.Owner].alertTick > 100 && h.attOwn >= 0 {
 		g.Players[t.Owner].alertTick = g.Tick
-		g.emit(Event{K: "alert", X: t.X, Y: t.Y, O: t.Owner})
+		ev := Event{K: "alert", X: t.X, Y: t.Y, O: t.Owner, P: t.Type}
+		if t.Kind == KBuilding {
+			ev.D = 1 // a building is under attack: the client sounds the bell
+		}
+		g.emit(ev)
 	}
 	// retaliation
 	if t.Kind == KUnit && t.HP > 0 {
