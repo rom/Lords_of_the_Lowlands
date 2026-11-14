@@ -893,7 +893,9 @@ export function iconCanvas(kind, type, def, era, team, themeName, size = 44) {
     ctx.drawImage(b.canvas, (size - b.w * sc) / 2, size - b.h * sc + 6, b.w * sc, b.h * sc);
   } else if (kind === 'resource') {
     const r = resourceSprite(type, themeName, 1);
-    ctx.drawImage(r.canvas, 0, -4, size, size * 1.25);
+    // crop around the object: 56x56 px above the anchor
+    const cw = type === 'tree' ? 64 : 44;
+    ctx.drawImage(r.canvas, (r.ox - cw / 2) * 2, (r.oy - cw * 0.85) * 2, cw * 2, cw * 2, 0, 0, size, size);
   }
   return cv;
 }

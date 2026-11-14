@@ -99,13 +99,17 @@ func listener(o *options) (net.Listener, error) {
 }
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:], nil); err != nil {
 		fmt.Fprintln(os.Stderr, "lotl-server:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
+// run starts the server and blocks until ctx is cancelled or serving fails.
+// ready, if non-nil, is called with the bound address once listening.
+func run(ctx context.Context, args []string, ready func(addr string)) error {
 	o, err := parseFlags(args)
 	if err != nil {
 		return err
@@ -171,9 +175,10 @@ func run(args []string) error {
 		TLSConfig:         tlsCfg,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	errc := make(chan error, 1)
+	if ready != nil {
+		ready(ln.Addr().String())
+	}
 	go func() {
 		log.Info("listening", "addr", ln.Addr().String(), "tls", tlsCfg != nil, "data", dataDir)
 		if tlsCfg != nil {

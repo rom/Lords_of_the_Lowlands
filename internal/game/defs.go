@@ -367,6 +367,12 @@ func makeUnit(t lineTemplate, s unitSpec, age int) *UnitDef {
 		cost[Food] += cost[Gold]
 		cost[Gold] = 0
 	}
+	if age >= 8 && t.class != ClassWorker {
+		// money economy: later eras pay more in gold, less in food
+		f := cost[Food]
+		cost[Food] = math.Round(f * 0.5)
+		cost[Gold] += math.Round(f * 0.35)
+	}
 	if age >= 10 && t.class != ClassWorker {
 		cost[Energy] = math.Round(10 + 4*float64(age-10)*(1+float64(t.pop)))
 	}
@@ -436,7 +442,7 @@ func eraNames(stone, bronze, iron, classical, medieval, gunpowder, industrial, m
 var buildingTemplates = []bTemplate{
 	{id: "town_center", names: eraNames("Camp Fire", "Chieftain Hall", "Longhouse", "Forum", "Keep", "Town Hall", "City Hall", "Capitol", "Arcology", "Command Nexus"),
 		size: 3, hp: 1400, build: 120, cost: Res{0, 275, 100, 0, 0}, pop: 10, dropoff: []int{Food, Wood, Stone, Gold},
-		trains: []string{ClassWorker}, attack: 5, rng: 6, rel: 2, sight: 8, desc: "Heart of your settlement. Trains workers and advances the age."},
+		trains: []string{ClassWorker}, attack: 4, rng: 6, rel: 2, sight: 8, desc: "Heart of your settlement. Trains workers and advances the age."},
 	{id: "house", names: eraNames("Hut", "Mud House", "Timber House", "Domus", "Cottage", "Townhouse", "Tenement", "Apartment", "Habitat", "Hab Module"),
 		size: 2, hp: 300, build: 18, cost: Res{0, 30, 0, 0, 0}, pop: 5, sight: 3, desc: "Provides housing for 5 population."},
 	{id: "granary", names: eraNames("Food Cache", "Granary", "Granary", "Horreum", "Mill", "Mill", "Grain Elevator", "Food Depot", "Bio-Store", "Nutrient Hub"),
@@ -546,6 +552,11 @@ func buildDefs() {
 			if age < 2 {
 				c[Food] += c[Gold]
 				c[Gold] = 0
+			}
+			if age >= 8 {
+				f := c[Food]
+				c[Food] = math.Round(f * 0.55)
+				c[Gold] += math.Round(f * 0.3)
 			}
 			if age >= 11 {
 				c[Energy] = math.Round(50 + 20*float64(age-11))

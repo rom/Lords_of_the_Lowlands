@@ -85,13 +85,13 @@ func (r *Room) summary() roomSummary {
 }
 
 type roomView struct {
-	T       string         `json:"t"`
-	ID      string         `json:"id"`
-	Name    string         `json:"name"`
-	Host    string         `json:"host"`
-	State   string         `json:"state"`
-	Level   levelInfo      `json:"level"`
-	Slots   []*Slot        `json:"slots"`
+	T     string    `json:"t"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	Host  string    `json:"host"`
+	State string    `json:"state"`
+	Level levelInfo `json:"level"`
+	Slots []*Slot   `json:"slots"`
 }
 
 func (r *Room) viewLocked() roomView {
@@ -342,6 +342,22 @@ func (h *Hub) rejoin(c *Client) {
 			}
 		}
 		r.mu.Unlock()
+	}
+}
+
+// handover moves the seat of a replaced connection to its successor.
+func (r *Room) handover(old, c *Client) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.Slots {
+		if s.client == old {
+			s.client = c
+			if r.State == StatePlaying {
+				c.sendJSON(r.startMsgLocked(s), false)
+			} else {
+				c.sendJSON(r.viewLocked(), false)
+			}
+		}
 	}
 }
 

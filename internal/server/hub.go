@@ -167,7 +167,11 @@ func (h *Hub) reader(ctx context.Context, c *Client) {
 func (h *Hub) register(c *Client) {
 	h.mu.Lock()
 	key := strings.ToLower(c.name)
-	if old := h.byName[key]; old != nil {
+	old := h.byName[key]
+	var seat *Room
+	if old != nil {
+		seat, old.room = old.room, nil
+		c.room = seat
 		old.errorMsg("logged in from another window")
 		old.close()
 	}
@@ -175,11 +179,16 @@ func (h *Hub) register(c *Client) {
 	h.byName[key] = c
 	hist := append([]chatOut(nil), h.history...)
 	h.mu.Unlock()
+	if seat != nil {
+		seat.handover(old, c)
+	}
 	c.sendJSON(map[string]interface{}{"t": "hello", "name": c.name, "guest": c.guest}, false)
 	for _, m := range hist {
 		c.sendJSON(m, false)
 	}
-	h.rejoin(c)
+	if seat == nil {
+		h.rejoin(c)
+	}
 	h.broadcastLobby()
 }
 

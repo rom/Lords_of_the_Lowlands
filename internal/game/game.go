@@ -377,7 +377,7 @@ func (g *Game) placeBuilding(typ string, owner, tx, ty int, complete bool) *Enti
 	p := g.Players[owner]
 	e.Age = p.Age
 	e.MaxHP = d.HP * (1 + 0.2*float64(p.Age)) * p.hpMul
-	e.Food = d.Food * (1 + 0.1*float64(p.Age))
+	e.Food = d.Food * (1 + 0.25*float64(p.Age))
 	if complete {
 		e.Built = true
 		e.Progress = 1

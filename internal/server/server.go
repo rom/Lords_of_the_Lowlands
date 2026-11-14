@@ -49,15 +49,15 @@ type session struct {
 
 // Server is the game back-end.
 type Server struct {
-	cfg      Config
-	log      *slog.Logger
-	mu       sync.Mutex
-	sessions map[string]*session
-	apiLimit *Limiter
+	cfg       Config
+	log       *slog.Logger
+	mu        sync.Mutex
+	sessions  map[string]*session
+	apiLimit  *Limiter
 	authLimit *Limiter
-	hub      *Hub
-	mux      *http.ServeMux
-	now      func() time.Time
+	hub       *Hub
+	mux       *http.ServeMux
+	now       func() time.Time
 }
 
 // New creates a server.

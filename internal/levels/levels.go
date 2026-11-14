@@ -101,13 +101,13 @@ func Index(id string) int {
 
 // SkirmishOptions configure a random map.
 type SkirmishOptions struct {
-	Theme    string `json:"theme"`
-	Size     int    `json:"size"`
-	StartAge int    `json:"startAge"`
-	MaxAge   int    `json:"maxAge"`
-	Seed     int64  `json:"seed"`
+	Theme    string  `json:"theme"`
+	Size     int     `json:"size"`
+	StartAge int     `json:"startAge"`
+	MaxAge   int     `json:"maxAge"`
+	Seed     int64   `json:"seed"`
 	Water    float64 `json:"water"`
-	Players  int    `json:"players"`
+	Players  int     `json:"players"`
 }
 
 // Skirmish builds a random-map level from options.

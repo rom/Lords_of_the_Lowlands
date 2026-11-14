@@ -188,6 +188,11 @@ func applyLandlock(o Options, r *Report) error {
 			return err
 		}
 	}
+	for _, p := range o.Writable {
+		if err := addPath(p, DataDirAccess(abi)); err != nil {
+			r.Warnings = append(r.Warnings, err.Error())
+		}
+	}
 	for _, p := range o.ReadOnly {
 		if err := addPath(p, unix.LANDLOCK_ACCESS_FS_READ_FILE|unix.LANDLOCK_ACCESS_FS_READ_DIR); err != nil {
 			r.Warnings = append(r.Warnings, err.Error())

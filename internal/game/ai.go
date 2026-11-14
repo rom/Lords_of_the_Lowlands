@@ -12,6 +12,8 @@ type AI struct {
 	attackSize int
 	nextAttack int
 	attacking  bool
+	waveSize   int
+	stageUntil int
 	lastBuild  map[string]int
 }
 
@@ -77,6 +79,20 @@ func (a *AI) survey(g *Game, p *Player) *aiState {
 	return s
 }
 
+func (s *aiState) tcX(g *Game) float64 {
+	if s.tc != nil {
+		return s.tc.X
+	}
+	return float64(g.W) / 2
+}
+
+func (s *aiState) tcY(g *Game) float64 {
+	if s.tc != nil {
+		return s.tc.Y
+	}
+	return float64(g.H) / 2
+}
+
 func (a *AI) think(g *Game, p *Player) {
 	s := a.survey(g, p)
 	if s.tc == nil {
@@ -111,7 +127,7 @@ func (a *AI) economy(g *Game, p *Player, s *aiState) {
 		want = [NumRes]float64{0.5, 0.38, 0.12, 0, 0}
 	}
 	if p.Age >= 10 {
-		want = [NumRes]float64{0.35, 0.25, 0.1, 0.18, 0.12}
+		want = [NumRes]float64{0.42, 0.2, 0.08, 0.2, 0.1}
 	}
 	// rebalance: move one worker from the most over-stocked resource to the
 	// scarcest one every few seconds
@@ -359,12 +375,10 @@ func itoa(i int) string {
 }
 
 func (a *AI) military(g *Game, p *Player, s *aiState) {
-	reserve := AgeCost(p.Age).Scale(0.35)
-	if len(s.workers) >= 10+p.Age && len(s.military) >= 3+p.Age/2 {
+	minArmy := 4 + p.Age/3
+	var reserve Res
+	if p.Age < g.Level.MaxAge && len(s.military) >= minArmy && len(s.workers) >= 10+p.Age/2 {
 		reserve = AgeCost(p.Age) // saving up for the next age
-	}
-	if p.Age >= g.Level.MaxAge {
-		reserve = Res{}
 	}
 	for _, kind := range []string{"barracks", "range", "stable", "workshop"} {
 		for _, b := range s.buildings[kind] {
@@ -392,7 +406,7 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 			break
 		}
 	}
-	if threat != nil {
+	if threat != nil && !a.attacking {
 		for _, m := range s.military {
 			if m.Order == OIdle || m.Order == OMove {
 				g.smart(m, threat, CmdAttack)
@@ -401,35 +415,60 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 		return
 	}
 	minutes := float64(g.Tick) / TickRate / 60
-	if len(s.military) >= a.attackSize+p.Age && g.Tick >= a.nextAttack && minutes > 4 {
-		target := a.pickTarget(g, p, s)
-		if target != nil {
+	if !a.attacking && len(s.military) >= a.attackSize+p.Age/2 && g.Tick >= a.nextAttack && minutes > 4 {
+		a.attacking = true
+		a.waveSize = len(s.military)
+		a.attackSize += 2
+		// stage the army together part-way to the target first
+		if t := a.pickTarget(g, p, s.tcX(g), s.tcY(g)); t != nil {
+			sx, sy := s.tcX(g)+(t.X-s.tcX(g))*0.55, s.tcY(g)+(t.Y-s.tcY(g))*0.55
 			var ids []int
 			for _, m := range s.military {
 				ids = append(ids, m.ID)
 			}
-			_ = g.Apply(Command{Player: p.Index, Type: CmdAMove, IDs: ids, X: target.X, Y: target.Y})
-			a.nextAttack = g.Tick + 900
-			a.attackSize += 2
+			_ = g.Apply(Command{Player: p.Index, Type: CmdAMove, IDs: ids, X: sx, Y: sy})
+			a.stageUntil = g.Tick + 300
 		}
 	}
-	// send idle soldiers back to rally near town centre
+	if a.attacking && g.Tick < a.stageUntil {
+		return
+	}
+	if a.attacking {
+		if len(s.military) < a.waveSize/3+1 {
+			// the wave is spent: regroup at home
+			a.attacking = false
+			a.nextAttack = g.Tick + 600
+			if s.tc != nil {
+				for _, m := range s.military {
+					g.orderMove(m, s.tc.X+3, s.tc.Y+3, true)
+				}
+			}
+			return
+		}
+		for _, m := range s.military {
+			if m.Order == OIdle || m.Order == OMove {
+				if t := a.pickTarget(g, p, m.X, m.Y); t != nil {
+					g.orderMove(m, t.X, t.Y, true)
+				}
+			}
+		}
+		return
+	}
+	// idle soldiers gather near the town centre
 	if s.tc != nil {
 		for _, m := range s.military {
-			if m.Order == OIdle && math.Hypot(m.X-s.tc.X, m.Y-s.tc.Y) > 16 && g.Tick > a.nextAttack-300 {
+			if m.Order == OIdle && math.Hypot(m.X-s.tc.X, m.Y-s.tc.Y) > 12 {
 				g.orderMove(m, s.tc.X+3, s.tc.Y+3, true)
 			}
 		}
 	}
 }
 
-func (a *AI) pickTarget(g *Game, p *Player, s *aiState) *Entity {
+// pickTarget returns the nearest hostile building (town centres preferred)
+// to (ox, oy).
+func (a *AI) pickTarget(g *Game, p *Player, ox, oy float64) *Entity {
 	var best *Entity
 	bd := 1e9
-	ox, oy := float64(g.W)/2, float64(g.H)/2
-	if s.tc != nil {
-		ox, oy = s.tc.X, s.tc.Y
-	}
 	for _, e := range g.Ents {
 		if e.Kind != KBuilding || !g.hostile(p.Index, e.Owner) {
 			continue
@@ -440,6 +479,15 @@ func (a *AI) pickTarget(g *Game, p *Player, s *aiState) *Entity {
 		}
 		if d < bd {
 			bd, best = d, e
+		}
+	}
+	if best == nil {
+		for _, e := range g.Ents {
+			if e.Kind == KUnit && g.hostile(p.Index, e.Owner) {
+				if d := math.Hypot(e.X-ox, e.Y-oy); d < bd {
+					bd, best = d, e
+				}
+			}
 		}
 	}
 	return best

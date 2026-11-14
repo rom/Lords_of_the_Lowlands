@@ -15,6 +15,8 @@ type Options struct {
 	DataDir string
 	// ReadOnly lists additional paths that may be read.
 	ReadOnly []string
+	// Writable lists additional directories with the same rights as DataDir.
+	Writable []string
 	// BindPort is the TCP port the server listens on (0 = none).
 	BindPort int
 	// AllowConnect lists TCP ports the process may connect to (usually
@@ -28,14 +30,14 @@ type Options struct {
 
 // Report describes what was applied.
 type Report struct {
-	NoNewPrivs     bool   `json:"noNewPrivs"`
-	NonDumpable    bool   `json:"nonDumpable"`
-	CapsDropped    bool   `json:"capsDropped"`
-	LandlockABI    int    `json:"landlockABI"`
-	LandlockFS     bool   `json:"landlockFS"`
-	LandlockNet    bool   `json:"landlockNet"`
-	LandlockScoped bool   `json:"landlockScoped"`
-	Seccomp        bool   `json:"seccomp"`
-	SeccompDenied  int    `json:"seccompDenied"`
+	NoNewPrivs     bool     `json:"noNewPrivs"`
+	NonDumpable    bool     `json:"nonDumpable"`
+	CapsDropped    bool     `json:"capsDropped"`
+	LandlockABI    int      `json:"landlockABI"`
+	LandlockFS     bool     `json:"landlockFS"`
+	LandlockNet    bool     `json:"landlockNet"`
+	LandlockScoped bool     `json:"landlockScoped"`
+	Seccomp        bool     `json:"seccomp"`
+	SeccompDenied  int      `json:"seccompDenied"`
 	Warnings       []string `json:"warnings,omitempty"`
 }

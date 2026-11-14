@@ -410,7 +410,9 @@ func (s *Store) Levels() []LevelMeta {
 	for _, m := range s.meta {
 		out = append(out, m)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name || (out[i].Name == out[j].Name && out[i].ID < out[j].ID) })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name || (out[i].Name == out[j].Name && out[i].ID < out[j].ID)
+	})
 	return out
 }
 
