@@ -1,8 +1,8 @@
 # Architecture
 
 Lords of the Lowlands is a single Go binary (`lotl-server`) that hosts the
-game simulation, the lobby/chat back-end, a small JSON-file database and the
-embedded browser client. Browsers render the game and send commands; the
+game simulation, the lobby/chat back-end, account administration,
+diagnostics, a small JSON-file database and the embedded browser client. Browsers render the game and send commands; the
 server is the only authority over game state.
 
 The views below follow the [C4 model](https://c4model.com/): context →
@@ -14,7 +14,9 @@ concurrency model and persistence.
 ```mermaid
 flowchart LR
     player(["Player<br/>(web browser)"])
+    gadmin(["Game administrator<br/>(browser, /admin.html)"])
     admin(["Operator"])
+    prom["Prometheus<br/>(optional)"]
     subgraph host["Linux host"]
         lotl["Lords of the Lowlands<br/>lotl-server"]
     end
@@ -25,13 +27,16 @@ flowchart LR
     player -- "HTTPS / WSS<br/>HTML, JS, REST, WebSocket" --> proxy
     player -. "HTTP(S) direct" .-> lotl
     proxy -- "HTTP + X-Forwarded-For" --> lotl
-    admin -- "systemctl, env file" --> systemd
+    gadmin -- "HTTPS: /api/admin/*" --> proxy
+    prom -- "GET /metrics (bearer token)" --> proxy
+    admin -- "systemctl, env file, lotl.yaml" --> systemd
     systemd -- "socket activation, sandbox" --> lotl
     lotl -- "JSON logs on stderr" --> journal
 ```
 
 There are no outbound dependencies: no database server, no CDN, no external
-identity provider, no telemetry. The server never opens an outbound
+identity provider (MFA is local TOTP), no telemetry push (metrics are
+pulled). The server never opens an outbound
 connection (enforced by Landlock and SELinux, see [security.md](security.md)).
 
 ## 2. Containers
@@ -41,22 +46,30 @@ flowchart TB
     subgraph browser["Browser (untrusted)"]
         ui["Web client<br/>vanilla ES modules, Canvas 2D,<br/>Web Audio — web/js/*.js"]
         editor["Level editor<br/>web/editor.html + editor.js"]
+        adminui["Admin page<br/>web/admin.html + admin.js"]
     end
+    cfg[/"lotl.yaml + LOTL_* env<br/>(read once at start-up)"/]
     subgraph proc["lotl-server process (Go, static, sandboxed)"]
         http["HTTP layer<br/>net/http + middleware<br/>internal/server"]
         ws["WebSocket hub & rooms<br/>internal/server (hub.go, room.go)"]
         sim["Game simulation<br/>internal/game"]
         camp["Campaign<br/>internal/levels"]
         store["Store<br/>internal/store"]
+        conf["Config<br/>internal/config"]
+        totp["TOTP<br/>internal/totp"]
         static["Embedded client<br/>web (go:embed)"]
         hard["Hardening<br/>internal/hardening"]
     end
-    data[("Data directory<br/>users.json, scores.json, levels.json")]
+    data[("Data directory<br/>users.json, scores.json, levels.json,<br/>saves/, audit.log")]
 
     ui -- "GET /, /js/*, /css/*" --> static
     ui -- "REST /api/*" --> http
     ui -- "WebSocket /ws (JSON, permessage-deflate)" --> ws
     editor -- "REST /api/levels, /api/generate" --> http
+    adminui -- "REST /api/admin/*, /api/stats" --> http
+    cfg --> conf
+    conf -.-> http
+    http --> totp
     http --> store
     http --> camp
     ws --> sim
@@ -69,11 +82,14 @@ flowchart TB
 | Container | Technology | Responsibility |
 |---|---|---|
 | Web client | ES modules, Canvas 2D, Web Audio, no build step | rendering, input, HUD, interpolation, procedural art/audio |
-| Level editor | same stack, `editor.html` | painting terrain/objects/starts, save/download/upload |
-| HTTP layer | `net/http` (Go 1.22+ pattern routing) | accounts, sessions, REST API, static files, security headers, CSRF and rate limiting |
-| Hub & rooms | `github.com/coder/websocket` | connections, chat, lobby, room/slot management, match loop |
-| Simulation | pure Go, no I/O | deterministic tick-based game rules, AI, pathfinding, fog, snapshots |
-| Store | `encoding/json`, `golang.org/x/crypto/argon2` | accounts (argon2id), scores, custom levels |
+| Level editor | same stack, `editor.html` | painting terrain/objects/starts, map type, save/download/upload |
+| Admin page | same stack, `admin.html` | players, games, health & performance, audit log |
+| HTTP layer | `net/http` (Go 1.22+ pattern routing) | accounts, sessions, MFA, admin API, diagnostics/metrics, REST API, static files, security headers, CSRF and rate limiting |
+| Hub & rooms | `github.com/coder/websocket` | connections, chat, lobby, room/slot management, match loop, anti-cheat, save/restore, demo rooms |
+| Simulation | pure Go, no I/O | deterministic tick-based game rules, AI, pathfinding (land and naval), fog, snapshots, save/load |
+| Store | `encoding/json`, `golang.org/x/crypto/argon2` | accounts (argon2id, roles, status, MFA, flags), scores, custom levels, saved games, audit log |
+| Config | `gopkg.in/yaml.v3` | defaults, YAML loading, validation |
+| TOTP | standard library | RFC 6238 codes, secrets, `otpauth://` URIs |
 | Hardening | `golang.org/x/sys/unix` | no_new_privs, capability drop, Landlock, seccomp |
 
 ## 3. Components
@@ -83,6 +99,8 @@ flowchart TB
 ```mermaid
 flowchart LR
     main["cmd/lotl-server<br/>flags, env, listener,<br/>socket activation, shutdown"]
+    config["internal/config"]
+    totp["internal/totp"]
     server["internal/server"]
     game["internal/game"]
     levels["internal/levels"]
@@ -90,8 +108,11 @@ flowchart LR
     hardening["internal/hardening"]
     web["web"]
 
+    main --> config
     main --> server
     main --> store
+    server --> config
+    server --> totp
     main --> hardening
     main --> web
     server --> game
@@ -101,15 +122,22 @@ flowchart LR
     store --> game
 ```
 
-The dependency graph is acyclic and layered: `game` depends on nothing but
-the standard library; `levels` and `store` depend on `game` (for `Level`
-validation); `server` composes everything; `hardening` is independent and is
-only called from `main`.
+The dependency graph is acyclic and layered: `game`, `totp` and `hardening`
+depend on nothing but the standard library (and `x/sys`); `config` only on
+`yaml.v3`; `levels` and `store` depend on `game` (for `Level` validation);
+`server` composes everything; `hardening` is only called from `main`.
 
 | Package | Key files | Main types / functions |
 |---|---|---|
-| `cmd/lotl-server` | `main.go` | `parseFlags`, `listener` (systemd `LISTEN_FDS`), `run` |
-| `internal/server` | `server.go` | `Server`, `Config`, `routes()`, middleware `recoverer → securityHeaders → limit` |
+| `cmd/lotl-server` | `main.go` | `parseFlags` (config file + env + flags), `listener` (systemd `LISTEN_FDS`), `run` |
+| `internal/config` | `config.go` | `Config`, `Default()`, `Load()`, `Parse()`, `Validate()` |
+| `internal/totp` | `totp.go` | `NewSecret`, `Code`, `Verify`, `URI` |
+| `internal/server` | `server.go` | `Server`, `Config`, `routes()`, middleware `recoverer → instrument → securityHeaders → limit` |
+| | `auth.go` | sessions (`rawSession`/`sessionFor`), register/login/guest, MFA, `bootstrapAdmin`, `/api/config` |
+| | `admin.go` | `admin()` guard, user/room/audit/kick handlers, saves REST |
+| | `metrics.go` | `Metrics`, latency histograms, `instrument`, `diagAllowed`, `/readyz`, `/api/health`, `/api/stats`, `/metrics`, `hashStatic` |
+| | `anticheat.go` | `cheatState` (key, sequence, score, APM), `Mac`, `inspectCommand`, `Hub.report`, `integrityCheck` |
+| | `room_extra.go` | `saveGame`, `restoreGame`, demo rooms (`startDemo`, `nextDemo`, `demoLevel`) |
 | | `ratelimit.go` | `Limiter` (keyed token bucket), `clientIP` |
 | | `protocol.go` | `ClientMsg`, `ParseClientMsg` (validation of every WebSocket message) |
 | | `hub.go` | `Hub`, `Client` (reader/writer goroutines, bounded send queue), chat |
@@ -118,11 +146,13 @@ only called from `main`.
 | | `commands.go` | `Command`, `Apply()` (validation + execution of player orders) |
 | | `defs.go` | `Ages`, `Units`, `Buildings`, `Techs`, `Resources`, `Counter()` |
 | | `path.go` | A* `findPath`, `smoothPath`, `lineClear` |
-| | `ai.go` | `AI.think()` — economy, construction, research, military |
-| | `snapshot.go` | `Snapshot()`, `EncodeFog()`/`DecodeFog()`, `MapView` |
-| | `level.go` | `Level`, `Validate()`, `Materialize()`, procedural `generate()` |
-| `internal/levels` | `levels.go` | 17 campaign `spec`s, `Campaign()`, `Get()`, `Skirmish()` |
-| `internal/store` | `store.go` | `Store`, `Register`/`Authenticate`, `RecordGame`, `SaveLevel` |
+| | `ai.go` | `Profiles` (6 difficulties), `AI.think()` — economy, construction, research, military, `naval()` |
+| | `snapshot.go` | `Snapshot()` (player or −1 = spectator), `EncodeFog()`/`DecodeFog()`, `MapView` |
+| | `level.go` | `Level`, `Validate()`, `Materialize()`, map types (`forMapType`, `NavalMap`), procedural `generate()`, `placeFish` |
+| | `save.go` | `SaveState`, `Save()`/`MarshalSave()`, `LoadGame()`, `SetController()` |
+| `internal/levels` | `levels.go` | 17 campaign `spec`s (with map type), `Campaign()`, `Get()`, `Skirmish()` |
+| `internal/store` | `store.go` | `Store`, `User` (role, status, MFA, flags), `CreateUser`/`Authenticate`, `RecordGame`, `SaveLevel` |
+| | `admin.go` | `GetUser`, `ListUsers`, `UpdateUser`, `SetPassword`, `DeleteUser`, `AddFlag`, `Audit`/`AuditLog`, `SaveGame`/`ListSaves`/`LoadSave`/`DeleteSave` |
 | `internal/hardening` | `hardening_linux.go`, `seccomp_*.go` | `Apply()`, `DropCapabilities()`, Landlock, `BuildFilter()` |
 | `web` | `embed.go`, `index.html`, `editor.html`, `js/`, `css/` | `FS()` |
 
@@ -131,9 +161,14 @@ only called from `main`.
 ```mermaid
 flowchart TB
     subgraph mw["HTTP middleware chain (Server.Handler)"]
-        rec["recoverer<br/>panic → 500"] --> sec["securityHeaders<br/>CSP, XFO, COOP, HSTS…"] --> lim["limit<br/>/api/*: rate limit, CSRF,<br/>Content-Type, 1 MiB body"] --> mux["ServeMux routes"]
+        rec["recoverer<br/>panic → 500"] --> ins["instrument<br/>request count, 5xx, latency"] --> sec["securityHeaders<br/>CSP, XFO, COOP, HSTS…"] --> lim["limit<br/>/api/*: rate limit, CSRF,<br/>Content-Type, body limit"] --> mux["ServeMux routes"]
     end
-    mux --> auth["auth handlers<br/>register / login / guest / logout / me"]
+    mux --> auth["auth handlers<br/>register / login / guest / logout / me / mfa"]
+    mux --> adm["admin handlers<br/>users / rooms / audit / kick"]
+    mux --> diag["diagnostics<br/>healthz / readyz / health / stats / metrics"]
+    adm --> st
+    adm --> hub
+    diag --> hub
     mux --> lvl["level handlers<br/>levels / generate / save / delete"]
     mux --> hof["scores / leaderboard / players / online"]
     mux --> wsH["/ws → Hub.serveWS"]
@@ -143,22 +178,27 @@ flowchart TB
     wsH --> hub["Hub<br/>clients, byName, rooms, chat history"]
     hub --> room["Room × N<br/>slots, game, cmds chan, loop goroutine"]
     room --> g["game.Game"]
+    hub --> ac["anti-cheat<br/>cheatState per client"]
+    room --> ac
     auth --> st["store.Store"]
+    auth --> totpc["totp"]
     lvl --> st
-    room -- "RecordGame" --> st
+    room -- "RecordGame, SaveGame, AddFlag, Audit" --> st
 ```
 
 ### 3.3 Client components
 
 | Module | Role |
 |---|---|
-| `main.js` | application shell: screens (login, menu, campaign, skirmish, lobby, room, hall of fame, settings), `Net` wiring, message dispatch |
+| `main.js` | application shell: screens (login incl. MFA code, MFA enrolment, menu, campaign, skirmish, lobby, room, saved games, hall of fame, settings), `Net` wiring, message dispatch, command signing, idle detection for demo mode |
 | `net.js` | `Net`: WebSocket with exponential reconnect and an outbound queue (≤ 50 messages while offline) |
-| `game.js` | in-match client: snapshot ingestion, interpolation, selection, control groups, command buttons, HUD, minimap, chat box |
+| `game.js` | in-match client: snapshot ingestion, interpolation, selection, control groups, command buttons, HUD, minimap, chat box, save game; spectator mode with `autoCamera` |
 | `render.js` | `Renderer`: isometric terrain chunks, water, entities, particles, projectiles, fog, minimap |
 | `sprites.js` | procedural art: terrain palettes per theme, buildings per era, units per sprite key, icons |
 | `audio.js` | Web Audio synthesiser: sound effects and generative era music |
 | `editor.js` | level editor |
+| `admin.js` | admin page: players, games, health & performance, audit log |
+| `integrity.js` | pure-JS SHA-256/HMAC-SHA256, `makeSigner` (per-connection key + sequence), `integrityReport` |
 | `util.js` | iso projection, colours, noise, DOM helper `el()` (textContent only), `api()` fetch wrapper |
 
 ## 4. Run-time view: a match
@@ -199,10 +239,10 @@ sequenceDiagram
     participant WR as Client.writer goroutine
     B->>RD: {"t":"cmd","cmd":{"c":"move","ids":[12,13],"x":20.5,"y":31}}
     RD->>RD: conn.Read (≤ 16 KiB) → ParseClientMsg
-    RD->>Hub: handle(): per-client cmd limiter (25/s, burst 60)
+    RD->>Hub: handle(): verify HMAC + sequence, cmd limiter (25/s, burst 60), APM window
     Hub->>R: r.command(): stamp cmd.Player from the seat, non-blocking send to cmds (cap 512)
     Note over R: select { cmd → pending (≤ 1024) | ticker }
-    R->>G: tick: lock room, Apply(cmd) for each pending
+    R->>G: tick: lock room, inspectCommand + Apply(cmd) for each pending
     G-->>R: error → {"t":"cmderr"} (lossy) to that player
     R->>G: Step()  (AI think, units, buildings, hits, fog, victory)
     R->>G: Events()
@@ -210,6 +250,10 @@ sequenceDiagram
         R->>G: Snapshot(player, events, fog = Tick%5==1)
         R->>WR: enqueue {"t":"snap","s":…} (lossy, queue 256)
     end
+    opt spectators (demo)
+        R->>G: Snapshot(-1, events) — unfogged
+    end
+    R->>Hub: after unlock: report() anti-cheat findings, ObserveTick
     WR->>B: conn.Write (10 s timeout, permessage-deflate)
     B->>B: onSnap → interpolate positions over 100 ms → render at display rate
 ```
@@ -226,13 +270,96 @@ Key properties of this flow:
   what that player's team can see (see [design.md §8](design.md#8-fog-of-war-and-visibility)).
 - **Back-pressure is explicit.** A slow client loses snapshots (lossy) but
   never blocks the room; reliable messages that do not fit disconnect it.
+- **Anti-cheat never blocks the tick.** Findings are collected under the
+  room lock and reported after it is released (reporting may resign the
+  player, which takes the room lock again).
 
 ### 4.3 End of game
 
 When `Game.Over` becomes true in `tick`, the room broadcasts
 `{"t":"end","results":[…],"winner":team}` (reliable), sets `State = "done"`,
 leaves the loop and calls `store.RecordGame` for every registered human
-(guests and AI are skipped). The room is deleted when its last human leaves.
+(guests, AI and players removed by the anti-cheat are skipped). The room is
+deleted when its last human leaves.
+
+### 4.4 Anti-cheat
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser (integrity.js)
+    participant Hub
+    participant AC as cheatState
+    participant R as Room.tick
+    participant St as Store
+    Hub-->>B: hello {key, signed}
+    B->>Hub: integrity {h: module SHA-256, wd}
+    Hub->>AC: compare with StaticHashes (+30 / +15)
+    B->>Hub: cmd {p, n, mac}
+    Hub->>AC: verify(n, p, mac) — bad MAC +25, bad sequence +15 → drop
+    Hub->>AC: rate() — > maxAPM/min +10
+    Hub->>R: command queued
+    R->>R: inspectCommand: hidden target +12, unexplored build +8, foreign units +10
+    R->>Hub: report(findings)
+    alt score ≥ warnScore
+        Hub-->>B: {"t":"warn"}
+    end
+    alt score ≥ kickScore
+        Hub->>R: Resign(player), slot.flagged
+        Hub->>St: AddFlag(account), Audit("anticheat","kick")
+        Hub-->>B: {"t":"error"} and close
+    end
+```
+
+Details and weights: [security.md §3.5](security.md#35-anti-cheat),
+[ADR-0015](adr/0015-layered-anti-cheat.md).
+
+### 4.5 Save and restore
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant Hub
+    participant R as Room
+    participant G as game.Game
+    participant St as Store
+    B->>Hub: {"t":"save","name"}
+    Hub->>R: lock, G.MarshalSave() + meta
+    Hub->>St: SaveGame(owner, meta, blob, max) → saves/<owner>/s-….json
+    Hub-->>B: {"t":"saved","id","name"}
+    Note over B,St: later, possibly after a restart
+    B->>Hub: {"t":"restore","save":id}
+    Hub->>St: LoadSave(owner, id)
+    Hub->>G: game.LoadGame(blob) — full validation
+    Hub->>R: newRoom(lobby): owner seat, AI seats, reserved open seats
+    R-->>B: {"t":"room",…}
+    B->>R: {"t":"start"}
+    R->>G: SetController per seat (human if connected, else AI)
+    R-->>B: {"t":"start",…} then snapshots
+```
+
+The save never leaves the server ([ADR-0016](adr/0016-server-side-save-games.md)).
+
+### 4.6 Demo mode
+
+An idle client sends `{"t":"demo"}`; `Hub.startDemo` creates a hidden room
+(`Demo = true`) whose only clients are `spectators`, sets up a random AI-only
+match and starts the normal `loop()`. Spectators get `Snapshot(-1)`. On game
+over or after `rotateMinutes`, `nextDemo` installs a new match in the same
+room; when the last spectator leaves, the loop ends. Demo rooms are skipped
+by `broadcastLobby`, cannot be joined and never record results
+([ADR-0018](adr/0018-demo-spectator-rooms.md)).
+
+### 4.7 Start-up order
+
+```mermaid
+flowchart LR
+    a["parseFlags:<br/>config.Load + env + flags,<br/>Validate"] --> b["logger"] --> c["store.Open"] --> d["TLS key pair"] --> e["listener<br/>(socket activation or bind)"] --> f["hardening.Apply<br/>(sandbox)"] --> g["server.New:<br/>hash embedded JS,<br/>bootstrapAdmin"] --> h["serve"]
+```
+
+Everything outside the data directory (config file, TLS files) is read
+before step f.
 
 ## 5. Concurrency model
 
@@ -261,12 +388,15 @@ flowchart LR
     lp -- "non-blocking enqueue" --> wr
 ```
 
+Metrics counters are `atomic.Int64`; the two latency histograms share
+`Metrics.mu`. The anti-cheat state has its own mutex per client.
+
 | Goroutine | Count | Blocks on | Owns |
 |---|---|---|---|
 | HTTP handler / WS reader | 1 per request / connection | `conn.Read` | message parsing, dispatch |
 | WS writer | 1 per connection | `send` channel, `conn.Write` (10 s timeout), 20 s ping ticker | the socket's write side |
 | WS closer | 1 per connection | `closed` channel | cancels the connection context |
-| Room loop | 1 per playing room | ticker, `cmds`, `stop` | exclusive access to `game.Game` (under `Room.mu`) |
+| Room loop | 1 per playing room (incl. demo rooms) | ticker, `cmds`, `stop` | exclusive access to `game.Game` (under `Room.mu`) |
 
 Rules that keep this deadlock-free and bounded:
 
@@ -291,17 +421,22 @@ Rules that keep this deadlock-free and bounded:
 
 | File (in `-data`) | Content | Written when |
 |---|---|---|
-| `users.json` | map lower-case name → `User` (name, salt, argon2id hash, created, games, wins, losses, best score, campaign progress) | register, game recorded |
+| `users.json` | map lower-case name → `User` (name, salt, argon2id hash, created, games, wins, losses, best score, campaign progress, role, status, MFA secret/enabled/required/last step, last login, anti-cheat flags, note) | register, login, MFA changes, admin changes, flags, game recorded |
 | `scores.json` | map level id → top 25 `Score` | game recorded |
 | `levels.json` | map id → custom `game.Level` | level saved / deleted |
+| `saves/<owner>/<id>.json` | `{"meta": SaveMeta, "game": SaveState}` | game saved / deleted, account deleted (folder removed) |
+| `audit.log` | JSON lines `AuditEntry` (`O_APPEND`, `0600`) | every audited action |
 
 - The whole map is re-serialised on each change and written **atomically**:
   `os.CreateTemp` in the data directory → `Chmod 0600` → write → `fsync` →
   `rename` over the target. A crash leaves either the old or the new file.
 - All state lives in memory and is loaded once at `store.Open`; invalid
   custom levels are dropped on load (`Level.Validate`).
+- Saved games are read from disk on demand (`ListSaves`, `LoadSave`), not
+  held in memory; `audit.log` is appended, not rewritten.
 - **Not persisted**: sessions (users must log in again after a restart), chat
-  history, rooms and running matches.
+  history, rooms, running matches (unless saved), anti-cheat scores and
+  metrics.
 - The data directory is the only writable path for the process (Landlock,
   systemd `ProtectSystem=strict`, SELinux `lotl_var_lib_t`).
 

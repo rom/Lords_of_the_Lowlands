@@ -1,0 +1,57 @@
+# Lords of the Lowlands server configuration.
+# Load with `lotl-server -config FILE` or LOTL_CONFIG=FILE.
+# Every key is optional; omitted keys keep the defaults shown here; unknown
+# keys are rejected. Precedence: flag > LOTL_* environment > this file > default.
+# The file is read once at start-up, before the sandbox is applied; changes
+# need a restart. Keep it free of secrets or protect it (0600 / systemd
+# LoadCredential=) if you set metrics.token. Never commit real secrets.
+
+server:
+  listen: "127.0.0.1:8080"   # host:port to bind (ignored with systemd socket activation)
+  port: 0                    # if non-zero, replaces the port of "listen"
+  tlsCert: ""                # PEM certificate; enables HTTPS together with tlsKey
+  tlsKey: ""
+  secureCookies: false       # implied by TLS; set when TLS terminates at a proxy
+  trustProxy: false          # honour X-Forwarded-For (only behind a trusted proxy)
+  allowedOrigins: []         # extra Origin hosts allowed for WebSockets/API writes
+  maxRooms: 200
+  logLevel: info             # debug, info, warn, error
+
+data:
+  dir: "./data"              # accounts, scores, levels, saves, audit log
+
+security:
+  sandbox: true              # seccomp + Landlock + capabilities (Linux)
+  sessionTTL: 168h
+  apiRate: 20                # requests per second per IP (token bucket)
+  apiBurst: 60
+  authRate: 0.2              # login/register attempts per second per IP
+  authBurst: 8
+  maxBodyBytes: 1048576
+
+accounts:
+  registration: open         # open | approval | closed
+  allowGuests: true
+  bootstrapAdmin: ""         # created at start-up if missing; password from LOTL_ADMIN_PASSWORD
+  requireAdminMFA: false     # administrators must enrol TOTP before using the admin page
+  minPasswordLength: 8
+  mfaIssuer: "Lords of the Lowlands"
+
+game:
+  maxSavesPerUser: 20
+  demo:
+    enabled: true            # self-playing attract mode on idle clients
+    idleMinutes: 3
+    rotateMinutes: 6
+    maxRooms: 10
+
+anticheat:
+  enabled: true
+  signedCommands: true       # HMAC-signed, sequenced command messages
+  maxAPM: 900                # sustained actions per minute considered inhuman
+  warnScore: 40
+  kickScore: 100
+
+metrics:
+  token: ""                  # bearer token for /api/stats and /metrics (>= 16 chars)
+  public: false              # if true and no token, diagnostics are public

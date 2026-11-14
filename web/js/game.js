@@ -5,7 +5,7 @@ import { iconCanvas, techIcon, cmdIcon, resIcon, romanNum, RES_COLORS } from './
 import { sfx, playMusic } from './audio.js';
 
 const RES_SHORT = ['Food', 'Wood', 'Stone', 'Gold', 'Energy'];
-const ECO = ['house', 'granary', 'lumber_camp', 'mining_camp', 'farm', 'town_center', 'generator'];
+const ECO = ['house', 'granary', 'lumber_camp', 'mining_camp', 'farm', 'dock', 'town_center', 'generator'];
 const MIL = ['barracks', 'range', 'stable', 'workshop', 'academy', 'tower'];
 const KEYS = ['q', 'w', 'e', 'r', 't', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
 
@@ -32,6 +32,8 @@ export class GameClient {
     this.events = [];
     this.lastFrame = performance.now();
     this.over = false;
+    this.spectator = start.you === -1;
+    this.alerts = [];
 
     this.root = $('#game');
     this.cv = $('#view');
@@ -41,6 +43,8 @@ export class GameClient {
     this.r.centerOn(start.cam[0], start.cam[1]);
     this.mini = $('#minimap');
     this.buildHUD();
+    this.root.classList.toggle('spectator', this.spectator);
+    if (this.spectator) { this.r.zoom = 0.85; this.nextPan = 0; }
     this.bind();
     playMusic(this.defs.ages[this.age].era);
     this.toast(`${this.level.name} — ${objectiveText(this.level.objective, this.defs, this.map.maxAge)}`, 6000);
@@ -49,6 +53,7 @@ export class GameClient {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.root.classList.remove('spectator');
     for (const [t, f, o] of this.handlers) t.removeEventListener(f, o);
     this.root.classList.add('hidden');
   }
@@ -59,7 +64,8 @@ export class GameClient {
     this.snap = s;
     this.snapT = now;
     this.res = s.res; this.pop = s.pop; this.cap = s.cap;
-    if (s.age !== this.age) { this.age = s.age; playMusic(this.defs.ages[this.age].era); this.menuDirty = true; }
+    const age = this.spectator ? Math.max(0, ...s.players.map(p => p.g)) : s.age;
+    if (age !== this.age) { this.age = age; playMusic(this.defs.ages[this.age].era); this.menuDirty = true; }
     this.techs = new Set(s.techs || []);
     this.players = s.players;
     const seen = new Set();
@@ -131,7 +137,7 @@ export class GameClient {
       case 'trained': if (mine) sfx('trained', pan, 0.5); break;
       case 'tech': if (mine) { sfx('tech'); this.toast(`Researched ${this.defs.techs[ev.p]?.name || ev.p}`); } break;
       case 'age': if (mine) { sfx('age'); this.toast(`You have advanced to the ${this.defs.ages[ev.d].name}!`, 5000); } else this.toast(`${this.pname(ev.o)} advanced to the ${this.defs.ages[ev.d].name}`); break;
-      case 'alert': if (mine) { sfx('alert'); this.toast('You are under attack!'); this.alertAt = { x: ev.x, y: ev.y }; } break;
+      case 'alert': if (mine) { sfx('alert'); this.toast('You are under attack!'); this.alertAt = { x: ev.x, y: ev.y }; this.alerts.push({ x: ev.x, y: ev.y, t: performance.now() / 1000 }); } break;
       case 'place': if (mine) sfx('place', pan, 0.6); break;
       case 'defeated': this.toast(`${this.pname(ev.o)} has been defeated.`, 5000); break;
     }
@@ -160,7 +166,7 @@ export class GameClient {
     $('#overlay').classList.remove('hidden');
   }
 
-  send(cmd) { this.net.send({ t: 'cmd', cmd }); }
+  send(cmd) { if (!this.spectator) this.app.sendCmd(cmd); }
 
   // --------------------------------------------------------- HUD
   buildHUD() {
@@ -311,6 +317,7 @@ export class GameClient {
         for (const id of list) {
           const d = this.defs.buildings[id];
           if (d.age > this.map.maxAge) continue;
+          if (id === 'dock' && !this.map.naval) continue;
           const era = this.defs.ages[this.age].era;
           const name = this.defs.buildingNames[id][era] || d.name;
           const locked = d.age > this.age;
@@ -349,7 +356,8 @@ export class GameClient {
       out.push(this.button(techIcon('age', this.age + 2), `Advance to ${next.name}`, [`Cost: ${this.costText(next.advanceCost)}`, `${next.years} — ${next.desc}`], () => this.send({ c: 'research', t: b.i, w: 'age' }), { key: key(), disabled: queued, poor: !this.canAfford(next.advanceCost) }));
     }
     if (b.def.research) {
-      const ids = Object.values(this.defs.techs).filter(t => t.age <= this.age && !this.techs.has(t.id) && !(b.q || []).some(q => q.t === t.id))
+      const ids = Object.values(this.defs.techs).filter(t => t.age <= this.age && !this.techs.has(t.id) && !(b.q || []).some(q => q.t === t.id)
+        && (!t.mapTypes || t.mapTypes.includes(this.map.mapType)))
         .sort((a, c) => a.age - c.age || a.kind.localeCompare(c.kind));
       const seenKind = new Set();
       for (const t of ids) {
@@ -368,9 +376,17 @@ export class GameClient {
     this.placing = { type: id, size: d.size };
   }
 
-  placementOK(tx, ty, size) {
+  placementOK(tx, ty, size, type) {
     const { w, h } = this.map;
     if (tx < 0 || ty < 0 || tx + size > w || ty + size > h) return false;
+    if (type === 'dock') {
+      let water = 0;
+      for (let y = ty - 1; y <= ty + size; y++) for (let x = tx - 1; x <= tx + size; x++) {
+        const edge = x === tx - 1 || x === tx + size || y === ty - 1 || y === ty + size;
+        if (edge && x >= 0 && y >= 0 && x < w && y < h && this.r.tiles[y * w + x] === 3) water++;
+      }
+      if (water < 2) return false;
+    }
     for (let y = ty; y < ty + size; y++) for (let x = tx; x < tx + size; x++) {
       const t = this.r.tiles[y * w + x];
       if (t === 3 || t === 4 || t === 5) return false;
@@ -438,6 +454,10 @@ export class GameClient {
     const box = el('div', { class: 'panel menu-box' },
       el('h2', { text: 'Game Menu' }),
       el('button', { class: 'btn', text: 'Resume', onclick: () => $('#overlay').classList.add('hidden') }),
+      this.app.me && !this.app.me.guest ? el('button', { class: 'btn', text: 'Save Game', onclick: () => {
+        const name = prompt('Name this saved game:', `${this.level.name} — ${fmtTime(this.snap ? this.snap.time : 0)}`);
+        if (name !== null) { this.net.send({ t: 'save', name }); $('#overlay').classList.add('hidden'); }
+      } }) : null,
       el('button', { class: 'btn', text: 'Settings', onclick: () => this.app.showSettings() }),
       el('button', { class: 'btn danger', text: 'Resign', onclick: () => { if (confirm('Resign this game?')) { this.send({ c: 'resign' }); $('#overlay').classList.add('hidden'); } } }),
       el('button', { class: 'btn', text: 'Leave to Menu', onclick: () => this.app.leaveGame() }),
@@ -566,7 +586,7 @@ export class GameClient {
     const p = this.placing;
     const tx = Math.floor(wx - p.size / 2 + 0.5), ty = Math.floor(wy - p.size / 2 + 0.5);
     const ids = this.selected().filter(e => e.o === this.you && e.k === 0 && e.def.class === 'worker').map(e => e.i);
-    if (!this.placementOK(tx, ty, p.size)) { sfx('error'); this.toast('Cannot build there'); return; }
+    if (!this.placementOK(tx, ty, p.size, p.type)) { sfx('error'); this.toast('Cannot build there'); return; }
     this.send({ c: 'build', ids, x: tx, y: ty, w: p.type });
     if (!keep) this.placing = null;
   }
@@ -625,6 +645,20 @@ export class GameClient {
   }
 
   // --------------------------------------------------------- frame
+  // In demo mode the camera drifts to where the action is.
+  autoCamera(ts) {
+    if (ts > this.nextPan) {
+      this.nextPan = ts + 9000;
+      const busy = [...this.ents.values()].filter(e => e.k === 0 && e.o >= 0 && (e.b || e.s === 3 || e.s === 2));
+      const pool = busy.length ? busy : [...this.ents.values()].filter(e => e.k === 1);
+      if (pool.length) { const e = pool[Math.floor(Math.random() * pool.length)]; this.camTarget = [e.x, e.y]; }
+    }
+    if (this.camTarget) {
+      const [tx, ty] = iso(this.camTarget[0], this.camTarget[1]);
+      this.r.camX += (tx - this.r.camX) * 0.02; this.r.camY += (ty - this.r.camY) * 0.02;
+    }
+  }
+
   frame(ts) {
     this.raf = requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.1, (ts - this.lastFrame) / 1000);
@@ -641,6 +675,7 @@ export class GameClient {
       if (this.mouse.y < 8) dy -= sp; if (this.mouse.y > this.r.H - 8) dy += sp;
     }
     if (dx || dy) this.r.pan(dx, dy);
+    if (this.spectator) this.autoCamera(ts);
     // interpolate
     const a = clamp((performance.now() - this.snapT) / 100, 0, 1);
     const list = [];
@@ -654,7 +689,7 @@ export class GameClient {
       const [wx, wy] = this.r.toWorld(this.mouse.x, this.mouse.y);
       const p = this.placing;
       const tx = Math.floor(wx - p.size / 2 + 0.5), ty = Math.floor(wy - p.size / 2 + 0.5);
-      ghost = { type: p.type, size: p.size, x: tx, y: ty, ok: this.placementOK(tx, ty, p.size), era: this.defs.ages[this.age].era };
+      ghost = { type: p.type, size: p.size, x: tx, y: ty, ok: this.placementOK(tx, ty, p.size, p.type), era: this.defs.ages[this.age].era };
     }
     let rally = null;
     if (this.sel.size === 1) { const b = this.ents.get([...this.sel][0]); if (b && b.rl) rally = b.rl; }
@@ -663,7 +698,7 @@ export class GameClient {
     this.r.draw(F, dt);
     this.fogDirty = F.fogDirty;
     this.miniT = (this.miniT || 0) + dt;
-    if (this.miniT > 0.25) { this.miniT = 0; this.r.minimap(this.mini, list, this.fog, this.you); }
+    if (this.miniT > 0.25) { this.miniT = 0; this.alerts = this.alerts.filter(a => performance.now() / 1000 - a.t < 6); this.r.minimap(this.mini, list, this.fog, this.you, this.alerts); }
     if (this.hudDirty) { this.hudDirty = false; this.updateHUD(); }
     this.cv.style.cursor = this.placing ? 'copy' : this.amoveMode ? 'crosshair' : 'default';
   }

@@ -20,7 +20,7 @@ Go, C++.
 ## Decision
 
 Write the server **and** the authoritative simulation in **Go** (module
-`github.com/rom/lords_of_the_lowlands`, Go 1.24):
+`github.com/rom/lords_of_the_lowlands`, Go 1.24 at the time; now Go 1.25, see `go.mod`):
 
 - `internal/game` is a pure library: no I/O, no goroutines, no clock; one
   `Game` value per match, driven by `Step()`.

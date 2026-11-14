@@ -21,13 +21,19 @@ flowchart TB
 
 | Layer | What | Where |
 |---|---|---|
-| Unit | pure functions and small types: `Res` ops, `Counter`, `CleanText`, `Level.Validate`, map generation determinism, `ValidName`, argon2id round trip, `Limiter`, `clientIP`, `ParseClientMsg` | `*_test.go` next to the code |
+| Unit | pure functions and small types: `Res` ops, `Counter`, `CleanText`, `Level.Validate`, map generation determinism, `ValidName`, argon2id round trip, `Limiter`, `clientIP`, `ParseClientMsg`, config defaults/parsing/validation, TOTP (RFC 6238 vectors) | `*_test.go` next to the code |
+| Configuration | `Default()` validates; `deploy/config/lotl.yaml` loads; partial files merge with defaults; empty document; 14 invalid inputs rejected (unknown key, port, TLS pair, rooms, registration, password length, TTL, rates, body size, saves, demo, scores, token, bad YAML); errors name the file | `internal/config/config_test.go` |
+| TOTP | RFC 6238 Appendix B SHA-1 vectors (t = 59, 1111111109, 1234567890, 2000000000); ±1 step accepted, −3 rejected, short code, bad/short secret, `otpauth://` URI | `internal/totp/totp_test.go` |
+| Flags | defaults, `-port` merge, `LOTL_*` env, config file overridden by flags, missing config file, socket activation, start/stop, error paths | `cmd/lotl-server/main_test.go` |
 | Simulation | `NewGame` set-up, gathering/deposit, hunting and carcasses, aggressive animals, build/train/research, farms and housing, combat and victory, survive/advance objectives, fog and snapshot filtering, pathfinding, flying and siege units, AI behaviour | `internal/game/game_test.go`, `sim_test.go`, `long_test.go` |
+| Map types & naval | every map type generates; coastal/riverland/lakes are naval with fish, desert never; invalid map type rejected; the AI builds a dock, fishes and sails (`TestAIFishesAndSails`); map techs only on their map types and their effects (`TestMapTechs`); a player builds a dock, trains a fishing boat and delivers fish (`TestPlayerFishing`) | `internal/game/naval_test.go` |
+| Save / load | round trip restores players, explored fog, AI state, entities and occupancy; the restored game runs 600 ticks and saves again; corrupt saves rejected (version, JSON, NaN, ids, owners, types, bounds, queues) | `internal/game/save_test.go` |
 | Integration | full HTTP handler under `httptest.NewServer`: auth flow and cookies, security headers, CSRF/content-type/size checks, recoverer, levels and scores APIs; WebSocket: session requirement, lobby, chat channels and rate limit, rooms (full room, host hand-over), quick games through to the `end` message and recorded scores | `internal/server/server_test.go` |
+| New features | registration modes and guests (`TestRegistrationModes`); admin API incl. last-admin protection, block → session loss, audit (`TestAdminAPI`); MFA setup/enable/login/replay/disable and restricted session (`TestMFAFlow`); `TestBootstrapAdmin`; health/ready/stats/metrics access rules (`TestDiagnostics`); signed commands, bad MAC/sequence, integrity, warn and kick (`TestAntiCheat`); hidden-target detection (`TestMapHackDetection`); save, list, restore with reserved seats, delete, demo rooms (`TestSaveRestoreAndDemo`) | `internal/server/features_test.go` |
 | Persistence | open/corrupt files, accounts, scores, level ownership and limits, write failures | `internal/store/store_test.go` |
 | Campaign | all 17 levels validate and materialise; skirmish options | `internal/levels/levels_test.go` |
 | OS sandbox | seccomp program checked with a small classic-BPF interpreter (native/foreign arch, x32, every denied number); Landlock access masks; `Apply` in a child process proving that `unshare`, `exec`, `ptrace`, writes outside the data dir (Landlock) and outbound TCP (Landlock ABI ≥ 4) fail while the data dir stays usable | `internal/hardening/*_test.go` |
-| Fuzzing | parsers and validators against arbitrary input | `fuzz_test.go` in `internal/server`, `internal/game`, `internal/store` |
+| Fuzzing | parsers and validators against arbitrary input | `fuzz_test.go` in `internal/server`, `internal/game`, `internal/store`; `FuzzLoadGame` in `internal/game/save_test.go` |
 | Browser | page loads, menus, a short match and the editor render without console errors | Playwright (see below) |
 
 Design choices that make this possible: `internal/game` has no I/O,
@@ -65,7 +71,7 @@ Target: **≥ 80 % of statements** across all packages, measured with
 for the package that owns it. `make cover` prints the total and fails the
 build below the threshold.
 
-Coverage results: see `make cover`.
+Current result: **92.8 %** of statements (`make cover`, total line).
 
 ## Fuzzing
 
@@ -80,6 +86,7 @@ from `make fuzz`:
 | `FuzzApply` | `internal/game` | arbitrary commands applied to a running game never panic, never make a resource negative and never move an entity off the map |
 | `FuzzFog` | `internal/game` | `DecodeFog(EncodeFog(v, e))` round-trips; arbitrary strings never panic the decoder |
 | `FuzzCleanText` | `internal/game` | output is valid UTF-8 within the rune limit and contains no NUL, ESC or bidi override/isolate characters |
+| `FuzzLoadGame` | `internal/game` | arbitrary bytes (seeded with a real save) either fail `LoadGame` or yield a game that can `Step` 20 ticks without panicking |
 | `FuzzOpenCorruptFiles` | `internal/store` | corrupt `users.json`/`scores.json`/`levels.json` either fail `Open` or load only valid levels; no panic |
 | `FuzzValidName` | `internal/store` | `ValidName` never accepts a name shorter than 3 or longer than 20 bytes |
 
@@ -149,3 +156,9 @@ volumes; age fanfare on advancing).
 | level format/limits | `TestLevelValidate`, `FuzzLevelJSON`, `docs/level-editor.md` |
 | sandbox | `TestFilterProgram`, `TestSandboxInChild`, `deploy/seccomp/README.md` |
 | HTTP middleware | `TestSecurityMiddleware`, `docs/security.md` |
+| a config key | `TestParse` (valid + invalid case), `deploy/config/lotl.yaml`, `docs/operations.md` key table |
+| accounts, MFA, admin | `features_test.go` (`TestMFAFlow`, `TestAdminAPI`), `docs/api.md`, `docs/security.md` |
+| the save format | `TestSaveRoundTrip`, `TestLoadRejectsCorruptSaves`, `FuzzLoadGame` seed; bump `SaveVersion` if incompatible |
+| anti-cheat weights / checks | `TestAntiCheat`, `TestMapHackDetection`, `docs/security.md §3.5` |
+| a metric | `TestDiagnostics`, `docs/api.md` metric table |
+| map types / naval rules | `naval_test.go`, `docs/game-design.md` |

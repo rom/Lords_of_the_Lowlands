@@ -1,7 +1,7 @@
 // Isometric renderer: procedural terrain chunks, animated water, entities,
 // effects, fog of war and minimap.
 import { TW, TH, ZH, TEAM, iso, fbm, vnoise, hash2, clamp, shade } from './util.js';
-import { theme, buildingSprite, drawBuilding, resourceSprite, drawUnit, smokePoints, P } from './sprites.js';
+import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P } from './sprites.js';
 
 const CH = 8; // chunk size in tiles
 const T_WATER = 3, T_MTN = 4, T_SHALLOW = 5;
@@ -105,9 +105,10 @@ export class Renderer {
       case T_WATER: {
         if (space) { r = 4; g = 4; b = 14; break; }
         const deep = clamp(shoreD / 5, 0, 1);
-        const sh = [c[0] + 40, c[1] + 55, c[2] + 40];
+        const sh = [c[0] + 46, c[1] + 62, c[2] + 44];
         r = sh[0] + (c[0] - sh[0]) * deep; g = sh[1] + (c[1] - sh[1]) * deep; b = sh[2] + (c[2] - sh[2]) * deep;
-        const k = 0.92 + n1 * 0.12; r *= k; g *= k; b *= k;
+        const abyss = 1 - 0.28 * clamp((shoreD - 4) / 8, 0, 1);
+        const k = (0.92 + n1 * 0.12) * abyss; r *= k; g *= k; b *= k;
         break;
       }
       case T_MTN: {
@@ -140,6 +141,9 @@ export class Renderer {
     const x0 = cx * CH, y0 = cy * CH;
     const c = [0, 0, 0], acc = [0, 0, 0];
     const { w, h, tiles, shore } = this;
+    const space = this.themeName === 'space';
+    let mimg = null, fimg = null;
+    for (let ty = Math.max(0, y0 - 1); ty < Math.min(y0 + CH + 1, h) && !mimg; ty++) for (let tx = Math.max(0, x0 - 1); tx < Math.min(x0 + CH + 1, w); tx++) { const t = tiles[ty * w + tx]; if (t === T_WATER || t === T_SHALLOW) { mimg = ctx.createImageData(cw, chh); fimg = ctx.createImageData(cw, chh); break; } }
     for (let py = 0; py < chh; py++) {
       for (let px = 0; px < cw; px++) {
         const sx = ox + px + 0.5, sy = oy + py + 0.5;
@@ -155,33 +159,64 @@ export class Renderer {
         fx = clamp((fx - 0.5) * 1.8 + 0.5, 0, 1); fy = clamp((fy - 0.5) * 1.8 + 0.5, 0, 1);
         fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
         acc[0] = acc[1] = acc[2] = 0;
+        let ww = 0, ws = 0;
         for (let k = 0; k < 4; k++) {
           const tx = clamp(ix + (k & 1), 0, w - 1), ty = clamp(iy + (k >> 1), 0, h - 1);
           const wgt = (k & 1 ? fx : 1 - fx) * (k >> 1 ? fy : 1 - fy);
           if (wgt < 0.001) continue;
           const ti = ty * w + tx;
+          if (tiles[ti] === T_WATER) ww += wgt; else if (tiles[ti] === T_SHALLOW) ws += wgt;
           this.terrainColor(tiles[ti], wx, wy, n1, n2, shore[ti] + ((k & 1 ? 1 - fx : fx) + (k >> 1 ? 1 - fy : fy)) * 0.5, c);
           acc[0] += c[0] * wgt; acc[1] += c[1] * wgt; acc[2] += c[2] * wgt;
         }
         // subtle global lighting gradient
-        const lg = 0.96 + (n1 - 0.5) * 0.1;
+        let lg = 0.96 + (n1 - 0.5) * 0.1;
         const o = (py * cw + px) * 4;
-        d[o] = acc[0] * lg; d[o + 1] = acc[1] * lg; d[o + 2] = acc[2] * lg; d[o + 3] = 255;
+        if (!space) {
+          // fine ground detail: grass blades / pebbles
+          const hsh = hash2(Math.floor(wx * 44), Math.floor(wy * 44), 3);
+          if (ww < 0.2 && hsh > 0.93) lg *= hsh > 0.975 ? 1.12 : 0.88;
+          // wet sand on the land side of the shore, foam on the water side
+          if (ww > 0.12 && ww < 0.5) lg *= 1 - 0.22 * Math.sin((ww - 0.12) / 0.38 * Math.PI);
+        }
+        let r = acc[0] * lg, g2 = acc[1] * lg, b2 = acc[2] * lg;
+        if (!space && ww > 0.46 && ww < 0.66) { const f = (1 - Math.abs(ww - 0.54) / 0.1) * (0.55 + n2 * 0.6); if (f > 0) { const k = Math.min(0.75, f * 0.6); r += (245 - r) * k; g2 += (250 - g2) * k; b2 += (252 - b2) * k; } }
+        d[o] = r; d[o + 1] = g2; d[o + 2] = b2; d[o + 3] = 255;
+        if (mimg) {
+          const wa = clamp((ww + ws * 0.7 - 0.5) * 4 + 0.5, 0, 1);
+          mimg.data[o] = mimg.data[o + 1] = mimg.data[o + 2] = 255; mimg.data[o + 3] = wa * 255;
+          if (ww > 0.5 && ww < 0.85 && !space) { const f = 1 - Math.abs(ww - 0.62) / 0.23; fimg.data[o] = fimg.data[o + 1] = fimg.data[o + 2] = 255; fimg.data[o + 3] = Math.max(0, f) * (0.3 + 0.7 * vnoise(wx * 9, wy * 9, 11)) * 210; }
+        }
       }
     }
     ctx.putImageData(img, 0, 0);
-    // water mask path for animated waves
-    const wp = new Path2D();
-    let hasWater = false;
-    for (let ty = y0; ty < Math.min(y0 + CH, h); ty++) for (let tx = x0; tx < Math.min(x0 + CH, w); tx++) {
-      const t = tiles[ty * w + tx];
-      if (t === T_WATER || t === T_SHALLOW) {
-        hasWater = true;
-        const [ax, ay] = iso(tx, ty);
-        wp.moveTo(ax - ox, ay - oy); wp.lineTo(ax + TW / 2 - ox, ay + TH / 2 - oy); wp.lineTo(ax - ox, ay + TH - oy); wp.lineTo(ax - TW / 2 - ox, ay + TH / 2 - oy); wp.closePath();
-      }
+    // soft water mask (for animated waves) and shore foam mask
+    let water = null, foam = null;
+    if (mimg) {
+      const mask = document.createElement('canvas'); mask.width = cw; mask.height = chh; mask.getContext('2d').putImageData(mimg, 0, 0);
+      foam = document.createElement('canvas'); foam.width = cw; foam.height = chh; foam.getContext('2d').putImageData(fimg, 0, 0);
+      // two pre-masked wave layers (different phases) that are cross-faded live
+      water = [0, 1].map(k => {
+        const wv = document.createElement('canvas'); wv.width = cw; wv.height = chh;
+        const wc = wv.getContext('2d');
+        const tx = ((k * 64 - ox) % 128 + 128) % 128 - 128, ty = ((k * 32 - oy) % 64 + 64) % 64 - 64;
+        wc.save(); wc.translate(tx, ty); wc.fillStyle = this.waterPattern; wc.fillRect(0, 0, cw + 128, chh + 64); wc.restore();
+        wc.globalCompositeOperation = 'destination-in'; wc.drawImage(mask, 0, 0);
+        return wv;
+      });
     }
-    return { cv, ox, oy, water: hasWater ? wp : null };
+    return { cv, ox, oy, water, foam };
+  }
+
+  // animated wave pattern masked to the water, plus pulsing shore foam
+  drawWater(ctx, c, cx, cy) {
+    const t = this.time;
+    const f = 0.5 + 0.5 * Math.sin(t * 0.9);
+    const dx = Math.sin(t * 0.35) * 4, dy = Math.cos(t * 0.3) * 2;
+    ctx.globalAlpha = 0.34 * f; ctx.drawImage(c.water[0], c.ox + dx, c.oy + dy);
+    ctx.globalAlpha = 0.34 * (1 - f); ctx.drawImage(c.water[1], c.ox - dx, c.oy - dy);
+    if (c.foam) { ctx.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.3 + cx * 1.7 + cy * 2.3); ctx.drawImage(c.foam, c.ox, c.oy); }
+    ctx.globalAlpha = 1;
   }
 
   chunk(cx, cy) {
@@ -209,13 +244,25 @@ export class Renderer {
     const ctx = cv.getContext('2d'); ctx.scale(2, 2); ctx.translate(40, 56);
     const base = this.th.t[T_MTN];
     const snow = this.themeName === 'winter';
-    for (let i = 0; i < 4; i++) {
-      const x = (hash2(v, i, 1) - 0.5) * 30, hgt = 14 + hash2(v, i, 2) * 26, wd = 10 + hash2(v, i, 3) * 8, y = (hash2(v, i, 4) - 0.5) * 8;
-      ctx.fillStyle = shade(base, 0.55);
-      ctx.beginPath(); ctx.moveTo(x - wd, y + 6); ctx.lineTo(x - wd * 0.3, y - hgt); ctx.lineTo(x, y + 8); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = shade(base, 1.05);
-      ctx.beginPath(); ctx.moveTo(x + wd, y + 6); ctx.lineTo(x - wd * 0.3, y - hgt); ctx.lineTo(x, y + 8); ctx.closePath(); ctx.fill();
-      if (snow || hgt > 34) { ctx.fillStyle = 'rgba(245,248,255,0.9)'; ctx.beginPath(); ctx.moveTo(x - wd * 0.3, y - hgt); ctx.lineTo(x - wd * 0.55, y - hgt * 0.65); ctx.lineTo(x + wd * 0.2, y - hgt * 0.62); ctx.closePath(); ctx.fill(); }
+    const peaks = [];
+    for (let i = 0; i < 5; i++) peaks.push({ x: (hash2(v, i, 1) - 0.5) * 32, hgt: 12 + hash2(v, i, 2) * 28, wd: 10 + hash2(v, i, 3) * 9, y: (hash2(v, i, 4) - 0.5) * 9 });
+    peaks.sort((a, b) => a.y - b.y);
+    for (const { x, hgt, wd, y } of peaks) {
+      const tx = x - wd * 0.25, ty = y - hgt;
+      // silhouette outline
+      ctx.fillStyle = 'rgba(20,18,16,0.7)';
+      ctx.beginPath(); ctx.moveTo(x - wd - 1, y + 7); ctx.lineTo(tx, ty - 1.2); ctx.lineTo(x + wd + 1, y + 7); ctx.lineTo(x, y + 9); ctx.closePath(); ctx.fill();
+      // lit (left) and shadow (right) faces with a mid facet
+      ctx.fillStyle = shade(base, 1.08);
+      ctx.beginPath(); ctx.moveTo(x - wd, y + 6); ctx.lineTo(tx, ty); ctx.lineTo(x - wd * 0.15, y + 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(base, 0.86);
+      ctx.beginPath(); ctx.moveTo(x - wd * 0.15, y + 8); ctx.lineTo(tx, ty); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(x + wd * 0.4, y + 7.5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(base, 0.58);
+      ctx.beginPath(); ctx.moveTo(x + wd * 0.4, y + 7.5); ctx.lineTo(x + wd * 0.35, y + 2 - hgt * 0.35); ctx.lineTo(tx, ty); ctx.lineTo(x + wd, y + 6); ctx.closePath(); ctx.fill();
+      // strata cracks
+      ctx.strokeStyle = shade(base, 0.5); ctx.lineWidth = 0.6;
+      for (let k = 1; k < 3; k++) { const f = k / 3; ctx.beginPath(); ctx.moveTo(x - wd * (1 - f) * 0.9, y + 6 - hgt * f * 0.9); ctx.lineTo(x - wd * 0.2 * (1 - f), y + 7 - hgt * f * 0.75); ctx.stroke(); }
+      if (snow || hgt > 32) { ctx.fillStyle = 'rgba(245,248,255,0.92)'; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx - wd * 0.3, ty + hgt * 0.32); ctx.lineTo(tx - wd * 0.05, ty + hgt * 0.24); ctx.lineTo(tx + wd * 0.15, ty + hgt * 0.36); ctx.lineTo(tx + wd * 0.3, ty + hgt * 0.22); ctx.closePath(); ctx.fill(); }
     }
     this.rockCache[key] = cv;
     return cv;
@@ -335,15 +382,7 @@ export class Renderer {
       let c = this.chunks.get(k);
       if (!c) { if (built >= (F.fastBuild ? 999 : 3)) continue; c = this.chunk(cx, cy); built++; }
       ctx.drawImage(c.cv, c.ox, c.oy);
-      if (c.water && this.themeName !== 'space') {
-        ctx.save(); ctx.translate(c.ox, c.oy); ctx.clip(c.water);
-        const off = (this.time * 12) % 128;
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = this.waterPattern;
-        ctx.translate(-off, -off * 0.5);
-        ctx.fillRect(off - 10, off * 0.5 - 10, CH * TW + 20, CH * TH + 20);
-        ctx.restore();
-      }
+      if (c.water && this.themeName !== 'space') this.drawWater(ctx, c, cx, cy);
     }
     this.pendingChunks = built;
     // grid in editor
@@ -379,15 +418,26 @@ export class Renderer {
     for (const it of drawables) {
       const e = it.e;
       if (!e || !F.sel || !F.sel.has(e.i)) continue;
-      const col = e.o === F.you ? '#7cff7c' : e.o < 0 ? '#ffffff' : '#ff6a5a';
-      ctx.strokeStyle = col; ctx.lineWidth = 1.5 / z;
+      const col = e.o === F.you ? '124,255,124' : e.o < 0 ? '255,255,255' : '255,106,90';
       if (e.k === 1) {
-        const s = e.def.size, x0 = e.x - s / 2, y0 = e.y - s / 2;
-        ctx.beginPath(); ctx.moveTo(...iso(x0, y0)); ctx.lineTo(...iso(x0 + s, y0)); ctx.lineTo(...iso(x0 + s, y0 + s)); ctx.lineTo(...iso(x0, y0 + s)); ctx.closePath(); ctx.stroke();
+        const s = e.def.size, x0 = e.x - s / 2, y0 = e.y - s / 2, x1 = x0 + s, y1 = y0 + s;
+        ctx.fillStyle = `rgba(${col},0.08)`;
+        ctx.beginPath(); ctx.moveTo(...iso(x0, y0)); ctx.lineTo(...iso(x1, y0)); ctx.lineTo(...iso(x1, y1)); ctx.lineTo(...iso(x0, y1)); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = `rgba(${col},0.35)`; ctx.lineWidth = 4 / z; ctx.stroke();
+        // corner brackets
+        ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 2 / z; ctx.lineCap = 'round';
+        const L = Math.min(0.45, s * 0.3);
+        ctx.beginPath();
+        for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x1, y1, -1, -1], [x0, y1, 1, -1]]) { ctx.moveTo(...iso(cx + dx * L, cy)); ctx.lineTo(...iso(cx, cy)); ctx.lineTo(...iso(cx, cy + dy * L)); }
+        ctx.stroke(); ctx.lineCap = 'butt';
       } else {
         const [sx, sy] = iso(e.x, e.y);
-        const r = e.def && (e.def.pop > 1 || e.def.class === 'siege' || e.def.class === 'mounted') ? 15 : 9;
+        const r = e.def && (e.def.naval || e.def.class === 'naval') ? (e.def.pop > 1 ? 30 : 20) : e.def && (e.def.pop > 1 || e.def.class === 'siege' || e.def.class === 'mounted') ? 15 : 9;
+        ctx.strokeStyle = `rgba(${col},0.3)`; ctx.lineWidth = 4 / z;
         ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, 0, 7); ctx.stroke();
+        ctx.strokeStyle = `rgb(${col})`; ctx.lineWidth = 1.4 / z;
+        const rot = this.time * 0.8;
+        for (let k = 0; k < 3; k++) { const a0 = rot + k * 2.094; ctx.beginPath(); ctx.ellipse(sx, sy, r, r * 0.5, 0, a0, a0 + 1.6); ctx.stroke(); }
       }
     }
     if (F.rally) {
@@ -415,25 +465,27 @@ export class Renderer {
       if (e.k === 2) {
         const s = resourceSprite(e.t, this.themeName, e.v || 0);
         const k = e.t === 'tree' ? 1 : 0.9;
-        ctx.drawImage(s.canvas, sx - s.ox * k, sy - s.oy * k, s.w * k, s.h * k);
+        if (e.t === 'fish') {
+          // gentle drift and an expanding ripple
+          const ph = t * 0.8 + (e.i || 0) * 0.37;
+          ctx.drawImage(s.canvas, sx - s.ox * k + Math.sin(ph) * 1.5, sy - s.oy * k + Math.cos(ph * 0.7) * 0.8, s.w * k, s.h * k);
+          const f = (t * 0.45 + (e.i || 0) * 0.29) % 1;
+          ctx.strokeStyle = `rgba(235,250,255,${0.5 * (1 - f)})`; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.ellipse(sx + Math.sin(e.i || 0) * 8, sy - 2, 3 + f * 14, (3 + f * 14) * 0.45, 0, 0, 7); ctx.stroke();
+        } else ctx.drawImage(s.canvas, sx - s.ox * k, sy - s.oy * k, s.w * k, s.h * k);
       } else if (e.k === 1) {
         const s = e.def.size;
         const stage = e.prog > 0 && e.prog < 1 ? Math.min(2, Math.floor(e.prog * 3)) : 3;
         const [ax, ay] = iso(e.x - s / 2, e.y - s / 2);
         const era = this.defs ? this.defs.ages[e.g || 0].era : 'stone';
-        if (stage === 3 && (e.t === 'granary' || e.t === 'town_center' || e.t === 'generator') && (era === 'medieval' || era === 'gunpowder' || era === 'future' || era === 'space')) {
-          // animated buildings are drawn live
-          ctx.save(); ctx.translate(ax, ay); drawBuilding(ctx, e.t, era, e.o, s, t); ctx.restore();
-        } else {
-          const sp = buildingSprite(e.t, era, e.o, s, stage);
-          ctx.drawImage(sp.canvas, ax - sp.ox, ay - sp.oy, sp.w, sp.h);
-          if (stage === 3) {
-            // flags waving are baked; add smoke and fire animation
-            for (const p of smokePoints(e.t, era, s)) {
-              if (Math.random() < dt * 4) { const pp = this.puff(e.x - s / 2 + p[0], e.y - s / 2 + p[1], 0, 'chimney'); if (pp) pp.z = p[2]; }
-            }
-            if (e.t === 'town_center' && era === 'stone' && Math.random() < 0.7) this.puff(e.x + s / 2 - 0.6, e.y + s / 2 - 0.6, 0.08, 'campfire');
+        const sp = buildingSprite(e.t, era, e.o, s, stage, true);
+        ctx.drawImage(sp.canvas, ax - sp.ox, ay - sp.oy, sp.w, sp.h);
+        if (stage === 3) {
+          if (buildingAnimated(e.t, era)) { ctx.save(); ctx.translate(ax, ay); drawBuildingAnim(ctx, e.t, era, e.o, s, t); ctx.restore(); }
+          for (const p of smokePoints(e.t, era, s)) {
+            if (Math.random() < dt * 4) { const pp = this.puff(e.x - s / 2 + p[0], e.y - s / 2 + p[1], 0, 'chimney'); if (pp) pp.z = p[2]; }
           }
+          if (e.t === 'town_center' && era === 'stone' && Math.random() < 0.7) this.puff(e.x - s / 2 + 2.15, e.y - s / 2 + 2.15, 0.08, 'campfire');
         }
         if (e.hp < 0.5 && stage === 3 && e.t !== 'farm' && Math.random() < dt * 6) this.puff(e.x + (Math.random() - 0.5) * s * 0.6, e.y + (Math.random() - 0.5) * s * 0.6, 0.1, Math.random() < 0.5 ? 'fire' : 'smoke');
       } else {
@@ -442,7 +494,7 @@ export class Renderer {
         const walking = e.moving;
         const walk = walking ? (t * (def.speed || 1) * 1.6 + e.i * 0.37) % 1 : 0;
         const act = e.b ? (t * 1.6 + e.i * 0.21) % 1 : 0;
-        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t });
+        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t, moving: !!walking });
       }
     }
     // particles
@@ -516,23 +568,46 @@ export class Renderer {
       });
     }
 
-    // fog of war
+    // drifting cloud shadows (cheap: a few soft ellipses)
+    if (!space && this.themeName !== 'space') {
+      for (let i = 0; i < 4; i++) {
+        const span = this.w + this.h + 20;
+        const cxw = ((hash2(i, 1, 21) * span + this.time * (0.25 + hash2(i, 2, 21) * 0.2)) % span) - 10, cyw = hash2(i, 3, 21) * this.h;
+        const [px, py] = iso(cxw, cyw);
+        const R = 140 + hash2(i, 4, 21) * 160;
+        const g = ctx.createRadialGradient(px, py, 0, px, py, R);
+        g.addColorStop(0, 'rgba(10,20,40,0.12)'); g.addColorStop(1, 'rgba(10,20,40,0)');
+        ctx.fillStyle = g; ctx.save(); ctx.translate(px, py); ctx.scale(1, 0.5); ctx.translate(-px, -py); ctx.beginPath(); ctx.arc(px, py, R, 0, 7); ctx.fill(); ctx.restore();
+      }
+    }
+    // fog of war: tile mask upscaled with a blur for soft, organic edges
     if (F.fog) {
-      if (!this.fogCv || this.fogCv.width !== this.w) { this.fogCv = document.createElement('canvas'); this.fogCv.width = this.w; this.fogCv.height = this.h; this.fogImg = this.fogCv.getContext('2d').createImageData(this.w, this.h); }
+      const FS = 4;
+      if (!this.fogCv || this.fogCv.width !== this.w || this.fogCv.height !== this.h) {
+        this.fogCv = document.createElement('canvas'); this.fogCv.width = this.w; this.fogCv.height = this.h; this.fogImg = this.fogCv.getContext('2d').createImageData(this.w, this.h);
+        this.fogBig = document.createElement('canvas'); this.fogBig.width = this.w * FS + 8; this.fogBig.height = this.h * FS + 8;
+        F.fogDirty = true;
+      }
       if (F.fogDirty) {
         const d = this.fogImg.data, fc = this.th.fog;
         for (let i = 0; i < F.fog.length; i++) {
           const s = F.fog[i];
           d[i * 4] = fc[0]; d[i * 4 + 1] = fc[1]; d[i * 4 + 2] = fc[2];
-          d[i * 4 + 3] = s === 0 ? 255 : s === 1 ? 120 : 0;
+          d[i * 4 + 3] = s === 0 ? 255 : s === 1 ? 125 : 0;
         }
         this.fogCv.getContext('2d').putImageData(this.fogImg, 0, 0);
+        const bc = this.fogBig.getContext('2d');
+        bc.clearRect(0, 0, this.fogBig.width, this.fogBig.height);
+        bc.imageSmoothingEnabled = true;
+        if ('filter' in bc) bc.filter = 'blur(3px)';
+        bc.drawImage(this.fogCv, 4, 4, this.w * FS, this.h * FS);
+        bc.filter = 'none';
         F.fogDirty = false;
       }
       ctx.save();
       ctx.transform(TW / 2, TH / 2, -TW / 2, TH / 2, 0, 0);
       ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(this.fogCv, 0, 0);
+      ctx.drawImage(this.fogBig, -4 / FS, -4 / FS, this.fogBig.width / FS, this.fogBig.height / FS);
       ctx.restore();
     }
     // health bars & labels on top of fog
@@ -547,10 +622,17 @@ export class Renderer {
       if (e.k === 1) { w = 40 + e.def.size * 6; off = 30 + e.def.size * 22; }
       else if (e.def && e.def.flying) off = 60;
       else if (e.def && (e.def.class === 'mounted' || e.def.class === 'siege')) off = 38;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(sx - w / 2 - 1, sy - off - 1, w + 2, 5);
-      ctx.fillStyle = e.hp > 0.5 ? '#3ad048' : e.hp > 0.25 ? '#e8c030' : '#e04030';
-      ctx.fillRect(sx - w / 2, sy - off, w * clamp(e.hp, 0, 1), 3);
-      if (e.k === 1 && e.prog > 0 && e.prog < 1) { ctx.fillStyle = '#5aa0ff'; ctx.fillRect(sx - w / 2, sy - off + 4, w * e.prog, 2); }
+      else if (e.def && (e.def.naval || e.def.class === 'naval')) off = e.def.pop > 1 ? 62 : 36;
+      const bh = e.k === 1 ? 5 : 4, x0 = Math.round(sx - w / 2), y0 = Math.round(sy - off);
+      ctx.fillStyle = 'rgba(10,8,6,0.85)'; ctx.fillRect(x0 - 1.5, y0 - 1.5, w + 3, bh + 3);
+      ctx.fillStyle = 'rgba(60,20,16,0.9)'; ctx.fillRect(x0, y0, w, bh);
+      const hp = clamp(e.hp, 0, 1), hc = hp > 0.5 ? ['#7af07a', '#2a9a36'] : hp > 0.25 ? ['#ffe070', '#c89a18'] : ['#ff8060', '#b82a1e'];
+      const hg = ctx.createLinearGradient(0, y0, 0, y0 + bh); hg.addColorStop(0, hc[0]); hg.addColorStop(1, hc[1]);
+      ctx.fillStyle = hg; ctx.fillRect(x0, y0, w * hp, bh);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(x0, y0, w * hp, 1);
+      if (w > 30) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; for (let k = 1; k < 10; k++) ctx.fillRect(x0 + Math.round(w * k / 10), y0, 1, bh); }
+      if (e.o >= 0) { ctx.fillStyle = TEAM[e.o] || '#888'; ctx.fillRect(x0 - 1.5, y0 - 1.5, 2.5, bh + 3); }
+      if (e.k === 1 && e.prog > 0 && e.prog < 1) { ctx.fillStyle = 'rgba(10,8,6,0.85)'; ctx.fillRect(x0 - 1.5, y0 + bh + 1, w + 3, 4); ctx.fillStyle = '#5aa0ff'; ctx.fillRect(x0, y0 + bh + 2, w * e.prog, 2); }
     }
     for (const f of this.texts) {
       const k = (t - f.t0) / f.d;
@@ -585,50 +667,130 @@ export class Renderer {
   }
 
   // ---------------------------------------------------------- minimap
-  minimap(mcv, ents, fog, you) {
+  // Minimap: terrain base (cached, relief-shaded), fog (unexplored = black
+  // clouds, explored = dimmed), team dots, alerts, camera frustum and frame.
+  // alerts: optional [{x, y, t}] (t = time the alert was raised, seconds,
+  // performance.now()/1000 or Renderer.time; only used for the pulse phase).
+  minimap(mcv, ents, fog, you, alerts) {
     const mctx = mcv.getContext('2d');
     const S = mcv.width;
+    if (!this.w) return;
     if (!this.miniBase || this.miniBase.width !== S || this.miniDirty) {
       this.miniDirty = false;
       this.miniBase = document.createElement('canvas'); this.miniBase.width = S; this.miniBase.height = S;
       const c = this.miniBase.getContext('2d');
-      const img = c.createImageData(this.w, this.h);
-      for (let i = 0; i < this.tiles.length; i++) {
-        const col = this.th.t[this.tiles[i]];
-        const n = 0.9 + hash2(i % this.w, (i / this.w) | 0) * 0.2;
+      const { w, h, tiles } = this;
+      const img = c.createImageData(w, h);
+      const hgt = (t) => t === T_MTN ? 3 : t === T_WATER ? -1 : t === T_SHALLOW ? -0.5 : 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x, t = tiles[i];
+        const col = this.th.t[t] || this.th.t[0];
+        let n = 0.9 + hash2(x, y) * 0.14 + (fbm(x * 0.15, y * 0.15, 2, 1) - 0.5) * 0.25;
+        // relief: light from the upper left
+        const dh = hgt(t) - hgt(tiles[Math.max(0, y - 1) * w + Math.max(0, x - 1)]);
+        n *= 1 + dh * 0.12;
+        if (t === T_WATER && this.shore) n *= 1 - Math.min(0.35, this.shore[i] * 0.04);
+        if (t !== T_WATER && this.shore && this.shore[i] === 0 && ((x > 0 && tiles[i - 1] === T_WATER) || (y > 0 && tiles[i - w] === T_WATER) || (x < w - 1 && tiles[i + 1] === T_WATER) || (y < h - 1 && tiles[i + w] === T_WATER))) n *= 1.18;
         img.data[i * 4] = col[0] * n; img.data[i * 4 + 1] = col[1] * n; img.data[i * 4 + 2] = col[2] * n; img.data[i * 4 + 3] = 255;
       }
-      const tmp = document.createElement('canvas'); tmp.width = this.w; tmp.height = this.h; tmp.getContext('2d').putImageData(img, 0, 0);
-      c.save(); this.miniTransform(c, S); c.drawImage(tmp, 0, 0); c.restore();
+      const tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h; tmp.getContext('2d').putImageData(img, 0, 0);
+      c.fillStyle = '#07090c'; c.fillRect(0, 0, S, S);
+      c.save(); this.miniTransform(c, S); c.imageSmoothingEnabled = true; c.drawImage(tmp, 0, 0); c.restore();
+      // cloud texture for unexplored areas
+      this.miniCloud = document.createElement('canvas'); this.miniCloud.width = S; this.miniCloud.height = S;
+      const cc = this.miniCloud.getContext('2d'); const ci = cc.createImageData(S, S);
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        const v = fbm(x / S * 9, y / S * 9, 4, 5);
+        const o = (y * S + x) * 4, k = 6 + v * 34;
+        ci.data[o] = k * 0.9; ci.data[o + 1] = k * 0.92; ci.data[o + 2] = k * 1.1; ci.data[o + 3] = 255;
+      }
+      cc.putImageData(ci, 0, 0);
+      this.miniFogLayer = document.createElement('canvas'); this.miniFogLayer.width = S; this.miniFogLayer.height = S;
     }
+    mctx.save();
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
     mctx.clearRect(0, 0, S, S);
     mctx.drawImage(this.miniBase, 0, 0);
-    mctx.save(); this.miniTransform(mctx, S);
-    for (const e of ents) {
-      if (e.k === 2) { if (e.t === 'tree') continue; mctx.fillStyle = e.t === 'gold' ? '#ffd84a' : e.t === 'stone' ? '#c8c8c8' : e.t === 'crystal' ? '#43d2ff' : '#d04060'; mctx.fillRect(e.x - 0.6, e.y - 0.6, 1.2, 1.2); continue; }
-      mctx.fillStyle = e.o < 0 ? '#e8d8b0' : TEAM[e.o];
-      const s = e.k === 1 ? e.def.size : 1.4;
-      mctx.fillRect(e.x - s / 2, e.y - s / 2, s, s);
-    }
+    // fog: unexplored = cloudy black, explored but not visible = dimmed
     if (fog) {
-      if (!this.miniFog || this.miniFog.width !== this.w) { this.miniFog = document.createElement('canvas'); this.miniFog.width = this.w; this.miniFog.height = this.h; }
+      if (!this.miniFog || this.miniFog.width !== this.w || this.miniFog.height !== this.h) { this.miniFog = document.createElement('canvas'); this.miniFog.width = this.w; this.miniFog.height = this.h; }
       const fc = this.miniFog.getContext('2d'); const img = fc.createImageData(this.w, this.h);
-      for (let i = 0; i < fog.length; i++) img.data[i * 4 + 3] = fog[i] === 0 ? 255 : fog[i] === 1 ? 110 : 0;
+      for (let i = 0; i < fog.length; i++) img.data[i * 4 + 3] = fog[i] === 0 ? 255 : fog[i] === 1 ? 120 : 0;
       fc.putImageData(img, 0, 0);
-      mctx.drawImage(this.miniFog, 0, 0);
+      const L = this.miniFogLayer.getContext('2d');
+      L.globalCompositeOperation = 'source-over'; L.clearRect(0, 0, S, S);
+      L.save(); this.miniTransform(L, S); L.imageSmoothingEnabled = true;
+      if ('filter' in L) L.filter = `blur(${Math.max(0.5, S / (this.w + this.h) * 0.6)}px)`;
+      L.drawImage(this.miniFog, 0, 0); L.filter = 'none'; L.restore();
+      L.globalCompositeOperation = 'source-in'; L.drawImage(this.miniCloud, 0, 0);
+      L.globalCompositeOperation = 'source-over';
+      mctx.drawImage(this.miniFogLayer, 0, 0);
+    }
+    // entities: team-coloured dots with a dark outline (client data is fog-filtered already)
+    const k = S * 0.94 / (this.w + this.h);
+    const dot = Math.max(2, k * 1.6);
+    for (const e of ents) {
+      const [px, py] = this.miniPoint(e.x, e.y, S);
+      if (e.k === 2) {
+        if (e.t === 'tree') continue;
+        mctx.fillStyle = e.t === 'gold' ? '#ffd84a' : e.t === 'stone' ? '#c8c8c8' : e.t === 'crystal' ? '#43d2ff' : e.t === 'fish' ? '#9fe0ff' : '#d04060';
+        mctx.fillRect(px - dot * 0.4, py - dot * 0.4, dot * 0.8, dot * 0.8);
+        continue;
+      }
+      const col = e.o < 0 ? '#e8d8b0' : TEAM[e.o] || '#888';
+      if (e.k === 1) {
+        const sz = (e.def ? e.def.size : 1) * k;
+        mctx.fillStyle = 'rgba(0,0,0,0.75)';
+        mctx.beginPath(); mctx.moveTo(px, py - sz - 1); mctx.lineTo(px + sz + 1, py); mctx.lineTo(px, py + sz + 1); mctx.lineTo(px - sz - 1, py); mctx.closePath(); mctx.fill();
+        mctx.fillStyle = col;
+        mctx.beginPath(); mctx.moveTo(px, py - sz); mctx.lineTo(px + sz, py); mctx.lineTo(px, py + sz); mctx.lineTo(px - sz, py); mctx.closePath(); mctx.fill();
+      } else {
+        mctx.fillStyle = 'rgba(0,0,0,0.75)'; mctx.fillRect(px - dot / 2 - 1, py - dot / 2 - 1, dot + 2, dot + 2);
+        mctx.fillStyle = col; mctx.fillRect(px - dot / 2, py - dot / 2, dot, dot);
+      }
+    }
+    // alerts: pulsing red rings
+    if (alerts && alerts.length) {
+      const now = performance.now() / 1000;
+      for (const a of alerts) {
+        if (!a) continue;
+        const [px, py] = this.miniPoint(a.x, a.y, S);
+        const ph = ((now - (a.t || 0)) * 1.4) % 1;
+        for (const off of [0, 0.5]) {
+          const f = (ph + off) % 1;
+          mctx.strokeStyle = `rgba(255,60,40,${0.9 * (1 - f)})`; mctx.lineWidth = Math.max(1.5, S / 180);
+          mctx.beginPath(); mctx.arc(px, py, S * 0.012 + f * S * 0.05, 0, 7); mctx.stroke();
+        }
+        mctx.fillStyle = '#ff4a30'; mctx.beginPath(); mctx.arc(px, py, Math.max(1.5, S / 160), 0, 7); mctx.fill();
+      }
+    }
+    // camera frustum
+    const pts = [this.toWorld(0, 0), this.toWorld(this.W, 0), this.toWorld(this.W, this.H), this.toWorld(0, this.H)].map(([x, y]) => this.miniPoint(x, y, S));
+    mctx.lineJoin = 'round';
+    mctx.strokeStyle = 'rgba(0,0,0,0.6)'; mctx.lineWidth = Math.max(2.5, S / 110);
+    mctx.beginPath(); pts.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath(); mctx.stroke();
+    mctx.strokeStyle = '#ffffff'; mctx.lineWidth = Math.max(1, S / 260); mctx.stroke();
+    // decorative frame around the map diamond
+    const D = [this.miniPoint(0, 0, S), this.miniPoint(this.w, 0, S), this.miniPoint(this.w, this.h, S), this.miniPoint(0, this.h, S)];
+    const fw = Math.max(2, S / 120);
+    mctx.beginPath(); D.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath();
+    mctx.strokeStyle = '#2a1e10'; mctx.lineWidth = fw * 2.2; mctx.stroke();
+    mctx.strokeStyle = '#c9a24e'; mctx.lineWidth = fw; mctx.stroke();
+    mctx.strokeStyle = 'rgba(255,240,190,0.5)'; mctx.lineWidth = fw * 0.3; mctx.stroke();
+    for (const p of D) {
+      mctx.fillStyle = '#2a1e10'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 2.4, 0, 7); mctx.fill();
+      mctx.fillStyle = '#d8b25a'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 1.6, 0, 7); mctx.fill();
+      mctx.fillStyle = '#7a5a24'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 0.7, 0, 7); mctx.fill();
     }
     mctx.restore();
-    // view rectangle
-    const pts = [this.toWorld(0, 0), this.toWorld(this.W, 0), this.toWorld(this.W, this.H), this.toWorld(0, this.H)].map(([x, y]) => this.miniPoint(x, y, S));
-    mctx.strokeStyle = '#fff'; mctx.lineWidth = 1;
-    mctx.beginPath(); pts.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath(); mctx.stroke();
   }
+  // The minimap shows the map as a diamond filling the whole square canvas.
   miniTransform(c, S) {
-    const k = S / (this.w + this.h);
-    c.transform(k, k / 2, -k, k / 2, S / 2, S / 4);
+    const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h);
+    c.transform(k, k, -k, k, this.h * k + m, m);
   }
-  miniPoint(x, y, S) { const k = S / (this.w + this.h); return [(x - y) * k + S / 2, (x + y) * k / 2 + S / 4]; }
-  miniToWorld(px, py, S) { const k = S / (this.w + this.h); const a = (px - S / 2) / k, b = (py - S / 4) * 2 / k; return [(a + b) / 2, (b - a) / 2]; }
+  miniPoint(x, y, S) { const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h); return [(x - y) * k + this.h * k + m, (x + y) * k + m]; }
+  miniToWorld(px, py, S) { const m = S * 0.03, k = (S - 2 * m) / (this.w + this.h); const a = (px - m - this.h * k) / k, b = (py - m) / k; return [(a + b) / 2, (b - a) / 2]; }
 }
 
 function makeWaterPattern() {

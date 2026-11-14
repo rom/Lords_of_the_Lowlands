@@ -34,7 +34,7 @@ flowchart LR
 
 | Resource | Sources | Drop-off |
 |---|---|---|
-| Food | berry bushes (150), hunting deer (120) / boar (260) / mammoth (650), farms | town centre, granary |
+| Food | berry bushes (150), hunting deer (120) / boar (260) / mammoth (650), farms, fish (350, fishing boats only) | town centre, granary; dock for fish |
 | Wood | trees (120 each) | town centre, lumber camp |
 | Stone | stone quarries (700) | town centre, mining camp |
 | Gold | gold mines (800); not used before the Copper Age | town centre, mining camp |
@@ -42,7 +42,8 @@ flowchart LR
 
 A worker carries `10 + its age` units per trip; gather speed grows 6 % per
 age and 15 % per *gather* technology. Farms are renewable-feeling but
-finite (320 food, +10 % per age), worked by one worker each. Boars and
+finite (320 food, +25 % per age; × 0.6 on desert and × 1.15 on riverland
+maps; farm techs add more), worked by one worker each. Boars and
 mammoths fight back — hunt them with several workers or soldiers.
 
 ## The seventeen ages
@@ -230,12 +231,57 @@ time: worker 10 s, infantry 14 s, ranged 15 s, mounted 20 s, siege 30 s.
 Siege engines (except the ram) have a minimum range of 2 tiles and back off
 from units that close in.
 
+## Map types
+
+Every level and random map has a **map type** that shapes terrain, economy
+and the technology tree.
+
+| Map type | Terrain | Economy | Naval | Extra technologies |
+|---|---|---|---|---|
+| **Inland** | lakes and hills as generated | normal | if the map has enough water (≥ 2 %) docks may be built, but no fish are generated | Caravans |
+| **Coastal** | an ocean along one side; starts pushed inland | normal | yes, fish along the shore | Fishing Nets, Navigation, Steam Ships |
+| **Riverland** | a river through the centre with sandy banks | farms +15 % | yes | Irrigation, Fishing Nets, Navigation, Steam Ships |
+| **Lakes** | many large lakes, no river | normal | yes | Fishing Nets, Navigation, Steam Ships |
+| **Desert** | sand, no water except small oases with palms; few trees and animals, richer mines | farms −40 % | never | Irrigation, Qanats, Deep Mining, Caravans |
+| **Highland** | mountain ranges, little water, richer mines | normal | if enough water | Terrace Farming, Deep Mining |
+
+Moon, Mars and space themes never have boats (their "water" is void).
+
+### Naval play
+
+The **dock** (Neolithic Age on, 150 wood, 3×3) must touch water on at least
+two edge tiles. It trains fishing boats and warships and is the drop-off for
+fish. Boats sail on water and fords only; land units cannot enter water.
+
+| Age | Fishing boat | Warship | Weapon | Splash | HP | Attack | Cost |
+|---|---|---|---|---|---|---|---|
+| 1 Neolithic | Dugout | War Canoe | arrows | — | 169 | 9.1 | 79F 134W |
+| 2 Copper | Fishing Boat | Galley | arrows | — | 208 | 11.2 | 29F 158W 65G |
+| 3 Bronze | Fishing Boat | War Galley | arrows | — | 247 | 13.3 | 33F 183W 75G |
+| 4 Iron | Fishing Boat | Bireme | bolts | — | 286 | 15.4 | 38F 207W 85G |
+| 5 Classical | Fishing Ship | Trireme | bolts | — | 325 | 17.5 | 42F 231W 95G |
+| 6 Early Middle | Fishing Ship | Longship | arrows | — | 364 | 19.6 | 46F 255W 104G |
+| 7 High Middle | Fishing Ship | War Cog | bolts | — | 403 | 21.7 | 51F 279W 114G |
+| 8 Renaissance | Fishing Sloop | Carrack | cannonballs | 0.6 | 442 | 23.8 | 55F 304W 124G |
+| 9 Imperial | Fishing Sloop | Ship of the Line | cannonballs | 0.8 | 481 | 25.9 | 60F 328W 134G |
+| 10 Industrial | Trawler | Ironclad | shells | 0.8 | 520 | 28.0 | 64F 352W 144G 20E |
+| 11 Machine | Trawler | Battleship | shells | 1.0 | 559 | 30.1 | 68F 376W 154G 28E |
+| 12 Atomic | Trawler | Destroyer | shells | 0.8 | 598 | 32.2 | 73F 400W 164G 36E |
+| 13 Information | Factory Trawler | Missile Cruiser | missiles | 1.2 | 637 | 34.3 | 77F 425W 174G 44E |
+| 14 Orbital | Factory Trawler | Hover Frigate | railgun | 1.0 | 676 | 36.4 | 82F 449W 184G 52E |
+| 15–16 | Aqua Drone | — (best earlier ship) | | | | | |
+
+Warships: range 5.5, armour 0.15, speed 1.45, sight 7, 2 population; +30 %
+damage against buildings, +20 % against boats. Fishing boats: 60 wood
+(+22 % per age), 45 HP (+30 % per age), speed 1.4, 1 population.
+
 ## Buildings
 
 | id | Age | Size | HP | Cost | Pop | Drop-off | Trains | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `academy` | 1 | 3×3 | 900 | 175W 50S | — | — | — | research |
 | `barracks` | 0 | 3×3 | 900 | 150W | — | — | infantry |  |
+| `dock` | 1 | 3×3 | 900 | 150W | — | Food (fish) | fishing boats, warships | on a shore; naval maps only |
 | `farm` | 0 | 3×3 | 200 | 60W | — | — | — | 320 food |
 | `generator` | 10 | 2×2 | 600 | 120W 80S 40G | — | — | — | 0.6 energy/s |
 | `granary` | 0 | 2×2 | 500 | 80W | — | Food | — |  |
@@ -257,6 +303,7 @@ from the start. Cancelling a foundation refunds 75 %.
 | id | stone | bronze | iron | classical | medieval | gunpowder | industrial | modern | future | space |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `academy` | Shaman Hut | Elder Hut | Temple | Academy | Monastery | University | Institute | Laboratory | Research Spire | Xeno Institute |
+| `dock` | Dockyard¹ | Jetty | Jetty | Harbour | Harbour | Harbour | Dockyard | Naval Base | Seaport | Seaport |
 | `barracks` | War Camp | War Lodge | Barracks | Castrum | Barracks | Barracks | Garrison | Military Base | Exo Bay | Marine Barracks |
 | `farm` | Wild Garden | Field | Field | Farm | Farm | Farm | Farmstead | Agri-Plant | Hydroponics | Hydroponic Dome |
 | `generator` | — | — | — | — | Windmill | Watermill | Coal Plant | Power Station | Fusion Plant | Zero-Point Core |
@@ -271,7 +318,8 @@ from the start. Cancelling a foundation refunds 75 %.
 | `workshop` | Workshop | Workshop | Siege Workshop | Siege Workshop | Siege Workshop | Foundry | Arsenal | Arsenal | Drone Yard | Orbital Shipyard |
 
 (The generator becomes available in the Industrial Age; its medieval and
-gunpowder names are never seen in normal play.)
+gunpowder names are never seen in normal play. ¹ The dock has no stone-era
+name and falls back to its default name.)
 
 ## Technologies
 
@@ -287,6 +335,24 @@ starter can still catch up on earlier ones.
 | hp | +10 % hit points for all your units and buildings, including existing ones |
 
 Every technology also makes workers 3 % faster.
+
+**Map technologies** — researched at the academy, but only on the map types
+listed:
+
+| Technology | Age | Cost | Effect | Map types |
+|---|---|---|---|---|
+| Irrigation | 1 | 150F 150W | +50 % farm yield | desert, riverland |
+| Terrace Farming | 2 | 150F 200W 50S | +25 % farm yield | highland |
+| Fishing Nets | 2 | 100F 150W 50G | +30 % fishing rate | coastal, riverland, lakes |
+| Deep Mining | 3 | 150F 200W 100G | +30 % stone and gold mining | highland, desert |
+| Navigation | 4 | 200F 250W 150G | +20 % warship attack and hit points | coastal, riverland, lakes |
+| Caravans | 4 | 200F 100W 150G | +10 % gather rate (all resources) | desert, inland |
+| Qanats | 5 | 300F 200W 200S 100G | +40 % farm yield | desert |
+| Steam Ships | 10 | 300F 300W 300G 100E | +25 % warship attack and hit points | coastal, riverland, lakes |
+
+Farm-yield techs affect farms built afterwards. Navigation and Steam Ships
+apply to every boat you own, including ones already afloat: warships hit
+harder and all boats (warships and fishing boats) gain hit points.
 
 Names and costs (F/W/S/G/E):
 
@@ -317,25 +383,25 @@ one age and allows advancing to the next. All computer opponents in a
 campaign level are allied against you. You can override the level's
 difficulty in the campaign screen.
 
-| # | Level | Theme | Ages | Map | Objective | AI | Difficulty |
-|---|---|---|---|---|---|---|---|
-| 1 | **The First Fire** | temperate | Dawn Age → Neolithic Age | 56² | Conquest — defeat every opponent | 1 | easy |
-| 2 | **Valley of Plenty** | temperate | Neolithic Age → Copper Age | 60² | Advance — be first to reach the final age | 1 | easy |
-| 3 | **Gift of the River** | desert | Copper Age → Bronze Age | 64² | Conquest — defeat every opponent | 2 | easy |
-| 4 | **The Sea Peoples** | tropical | Bronze Age → Iron Age | 64² | Survive — hold out 15 min | 2 | normal |
-| 5 | **Iron and Ice** | winter | Iron Age → Classical Age | 68² | Conquest — defeat every opponent | 1 | normal |
-| 6 | **Phalanx** | desert | Classical Age → Early Middle Ages | 68² | Conquest — defeat every opponent | 1 | normal |
-| 7 | **Shield Wall** | temperate | Early Middle Ages → High Middle Ages | 72² | Conquest — defeat every opponent | 2 | normal |
-| 8 | **Lords of the Lowlands** | temperate | High Middle Ages → Renaissance | 76² | Conquest — defeat every opponent | 2 | normal |
-| 9 | **Pike and Shot** | temperate | Renaissance → Imperial Age | 76² | Conquest — defeat every opponent | 1 | hard |
-| 10 | **A New World** | tropical | Imperial Age → Industrial Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 11 | **The Iron Horse** | temperate | Industrial Age → Machine Age | 80² | Conquest — defeat every opponent | 2 | normal |
-| 12 | **No Man's Land** | winter | Machine Age → Atomic Age | 80² | Survive — hold out 20 min | 2 | hard |
-| 13 | **Iron Curtain** | winter | Atomic Age → Information Age | 88² | Conquest — defeat every opponent | 3 | normal |
-| 14 | **Silicon Frontier** | desert | Information Age → Orbital Age | 88² | Conquest — defeat every opponent | 2 | hard |
-| 15 | **Sea of Tranquility** | moon | Orbital Age → Interplanetary Age | 84² | Conquest — defeat every opponent | 2 | hard |
-| 16 | **Red Planet** | mars | Interplanetary Age → Interstellar Age | 92² | Conquest — defeat every opponent | 2 | hard |
-| 17 | **Battle for the Stars** | space | Interstellar Age | 96² | Conquest — defeat every opponent | 3 | hard |
+| # | Level | Theme | Map type | Ages | Map | Objective | AI | Difficulty |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **The First Fire** | temperate | inland | Dawn Age → Neolithic Age | 56² | Conquest — defeat every opponent | 1 | easy |
+| 2 | **Valley of Plenty** | temperate | riverland | Neolithic Age → Copper Age | 60² | Advance — be first to reach the final age | 1 | easy |
+| 3 | **Gift of the River** | desert | riverland | Copper Age → Bronze Age | 64² | Conquest — defeat every opponent | 2 | easy |
+| 4 | **The Sea Peoples** | tropical | coastal | Bronze Age → Iron Age | 64² | Survive — hold out 15 min | 2 | normal |
+| 5 | **Iron and Ice** | winter | coastal | Iron Age → Classical Age | 68² | Conquest — defeat every opponent | 1 | normal |
+| 6 | **Phalanx** | desert | coastal | Classical Age → Early Middle Ages | 68² | Conquest — defeat every opponent | 1 | normal |
+| 7 | **Shield Wall** | temperate | riverland | Early Middle Ages → High Middle Ages | 72² | Conquest — defeat every opponent | 2 | normal |
+| 8 | **Lords of the Lowlands** | temperate | coastal | High Middle Ages → Renaissance | 76² | Conquest — defeat every opponent | 2 | normal |
+| 9 | **Pike and Shot** | temperate | inland | Renaissance → Imperial Age | 76² | Conquest — defeat every opponent | 1 | hard |
+| 10 | **A New World** | tropical | coastal | Imperial Age → Industrial Age | 80² | Conquest — defeat every opponent | 2 | normal |
+| 11 | **The Iron Horse** | temperate | inland | Industrial Age → Machine Age | 80² | Conquest — defeat every opponent | 2 | normal |
+| 12 | **No Man's Land** | winter | inland | Machine Age → Atomic Age | 80² | Survive — hold out 20 min | 2 | hard |
+| 13 | **Iron Curtain** | winter | lakes | Atomic Age → Information Age | 88² | Conquest — defeat every opponent | 3 | normal |
+| 14 | **Silicon Frontier** | desert | desert | Information Age → Orbital Age | 88² | Conquest — defeat every opponent | 2 | hard |
+| 15 | **Sea of Tranquility** | moon | inland | Orbital Age → Interplanetary Age | 84² | Conquest — defeat every opponent | 2 | hard |
+| 16 | **Red Planet** | mars | inland | Interplanetary Age → Interstellar Age | 92² | Conquest — defeat every opponent | 2 | hard |
+| 17 | **Battle for the Stars** | space | inland | Interstellar Age | 96² | Conquest — defeat every opponent | 3 | hard |
 
 1. **The First Fire** — 300,000 years ago a band huddles around the first fire. Hunt mammoth and deer, gather berries and drive the rival clan from the valley. Discover farming to enter the Neolithic.
 2. **Valley of Plenty** — The ice retreats and wild grain covers the valley. Be the first tribe to master copper and enter the Copper Age.
@@ -360,8 +426,16 @@ registered players; guests can play everything but are not recorded.
 
 ## Skirmish and multiplayer
 
-- **Skirmish vs computer**: random map (theme, size 56–120, water amount,
-  start/final age, 1–7 opponents, difficulty) or any campaign/custom map.
+- **Skirmish vs computer**: random map (theme, map type, size 56–120, water
+  amount, start/final age, 1–7 opponents, difficulty) or any campaign/custom
+  map.
+- **Saved games** (registered players): *Save Game* in the in-game menu
+  stores the whole match on the server (up to 20 saves by default);
+  *Load Game* resumes it in a new room where your seat is restored, other
+  human seats wait for anyone to join and empty seats are played by the
+  computer.
+- **Demo mode**: after a few idle minutes on the menu the game shows a
+  self-playing AI match with an automatic camera; any key or click returns.
 - **Multiplayer lobby**: create a battle on any level, choose seats
   (open / closed / AI with difficulty), teams 1–8, and chat. At least two
   teams are required. Disconnected players keep their seat and are
@@ -393,18 +467,24 @@ registered players; guests can play everything but are not recorded.
 
 ## Computer opponents
 
-| Difficulty | Economy and production speed | First attack |
-|---|---|---|
-| Easy | 75 % | at 14 + age/2 soldiers |
-| Normal | 100 % | at 10 + age/2 soldiers |
-| Hard | 130 % | at 8 + age/2 soldiers |
+Six difficulty levels:
 
-The computer plays by the same rules as you — it sees only what its units
-see, pays for everything and obeys the population cap. Its difficulty bonus
-only speeds up gathering, construction and training. It attacks in waves
-(never before minute 4), gathers its army half-way before striking, retreats
-to regroup when a wave is spent and grows each subsequent wave. It defends
-its town centre against intruders and rebuilds it if it falls.
+| Difficulty | Economy, building and training speed | Army before the first wave | First wave not before | Free resources | Map vision |
+|---|---|---|---|---|---|
+| Super easy | 55 % | 20 + age/2 | minute 12 | — | own |
+| Easy | 75 % | 14 + age/2 | minute 7 | — | own |
+| Normal | 100 % | 10 + age/2 | minute 4 | — | own |
+| Hard | 130 % | 8 + age/2 | minute 3.5 | — | own |
+| Super hard | 160 % | 7 + age/2 | minute 3 | 0.3 of each per second | own |
+| Insane | 200 % | 6 + age/2 | minute 2.5 | 0.8 of each per second | **whole map** |
+
+(Energy is only trickled from the Industrial Age.) The computer plays by the
+same rules as you — it pays for everything and obeys the population cap; up
+to *hard* it sees only what its units see. It attacks in waves, gathers its
+army half-way before striking, retreats to regroup when a wave is spent and
+grows each subsequent wave by two. It defends its town centre against
+intruders and rebuilds it if it falls. On naval maps it builds a dock,
+fishes and later trains warships.
 
 ## Scoring
 

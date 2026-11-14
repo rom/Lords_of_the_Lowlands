@@ -142,7 +142,8 @@ func fsAccess(abi int) uint64 {
 // DataDirAccess are the rights granted beneath the data directory.
 func DataDirAccess(abi int) uint64 {
 	a := uint64(unix.LANDLOCK_ACCESS_FS_WRITE_FILE | unix.LANDLOCK_ACCESS_FS_READ_FILE | unix.LANDLOCK_ACCESS_FS_READ_DIR |
-		unix.LANDLOCK_ACCESS_FS_REMOVE_FILE | unix.LANDLOCK_ACCESS_FS_MAKE_REG)
+		unix.LANDLOCK_ACCESS_FS_REMOVE_FILE | unix.LANDLOCK_ACCESS_FS_MAKE_REG |
+		unix.LANDLOCK_ACCESS_FS_MAKE_DIR | unix.LANDLOCK_ACCESS_FS_REMOVE_DIR) // per-user save folders
 	if abi >= 3 {
 		a |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
 	}

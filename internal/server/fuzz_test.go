@@ -28,7 +28,7 @@ func FuzzParseClientMsg(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if !validTypes[m.T] || !validDiff[m.Diff] || m.Team < 0 || m.Team > 8 || m.Slot < 0 || m.Slot >= game.MaxPlayers {
+		if !validTypes[m.T] || !validDiffName(m.Diff) || m.Team < 0 || m.Team > 8 || m.Slot < 0 || m.Slot >= game.MaxPlayers {
 			t.Fatalf("invalid message accepted: %+v", m)
 		}
 		if m.T == "chat" {

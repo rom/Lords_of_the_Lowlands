@@ -125,6 +125,8 @@ const (
 	ClassMounted  = "mounted"
 	ClassSiege    = "siege"
 	ClassAnimal   = "animal"
+	ClassNaval    = "naval"
+	ClassFisher   = "fisher"
 	ClassBuilding = "building"
 )
 
@@ -152,6 +154,7 @@ type UnitDef struct {
 	Splash     float64 `json:"splash"`
 	Sprite     string  `json:"sprite"`
 	Desc       string  `json:"desc"`
+	Naval      bool    `json:"naval,omitempty"`
 	// Animals only.
 	Food       float64 `json:"food,omitempty"`
 	Aggressive bool    `json:"aggressive,omitempty"`
@@ -190,6 +193,21 @@ type TechDef struct {
 	Cost   Res     `json:"cost"`
 	Time   float64 `json:"time"`
 	Desc   string  `json:"desc"`
+	// MapTypes restricts the tech to these map types (empty: all maps).
+	MapTypes []string `json:"mapTypes,omitempty"`
+}
+
+// AllowedOn reports whether the tech can be researched on a map type.
+func (t *TechDef) AllowedOn(mapType string) bool {
+	if len(t.MapTypes) == 0 {
+		return true
+	}
+	for _, m := range t.MapTypes {
+		if m == mapType {
+			return true
+		}
+	}
+	return false
 }
 
 // ResourceDef describes a harvestable map object.
@@ -209,6 +227,7 @@ var Resources = map[string]*ResourceDef{
 	"gold":    {ID: "gold", Name: "Gold Mine", Res: Gold, Amount: 800, Rate: 0.8, Block: true},
 	"stone":   {ID: "stone", Name: "Stone Quarry", Res: Stone, Amount: 700, Rate: 0.8, Block: true},
 	"carcass": {ID: "carcass", Name: "Carcass", Res: Food, Amount: 100, Rate: 1.3, Block: false},
+	"fish":    {ID: "fish", Name: "Fish", Res: Food, Amount: 350, Rate: 1.1, Block: false},
 	"crystal": {ID: "crystal", Name: "Energy Crystal", Res: Energy, Amount: 600, Rate: 0.7, Block: true},
 }
 
@@ -465,6 +484,9 @@ var buildingTemplates = []bTemplate{
 		age: 1, size: 3, hp: 900, build: 50, cost: Res{0, 175, 50, 0, 0}, research: true, sight: 5, desc: "Researches technologies."},
 	{id: "tower", names: eraNames("Lookout", "Watch Tower", "Watch Tower", "Tower", "Guard Tower", "Bastion", "Blockhouse", "Bunker", "Laser Turret", "Ion Cannon"),
 		age: 1, size: 1, hp: 700, build: 40, cost: Res{0, 40, 120, 0, 0}, attack: 6, rng: 7, rel: 2, sight: 9, desc: "Defensive tower that shoots enemies."},
+	{id: "dock", names: eraNames("", "Jetty", "Jetty", "Harbour", "Harbour", "Harbour", "Dockyard", "Naval Base", "Seaport", "Seaport"),
+		age: 1, size: 3, hp: 900, build: 45, cost: Res{0, 150, 0, 0, 0}, dropoff: []int{Food}, trains: []string{ClassFisher, ClassNaval}, sight: 6,
+		desc: "Built on a shore. Trains fishing boats and warships; drop-off for fish."},
 	{id: "generator", names: eraNames("", "", "", "", "Windmill", "Watermill", "Coal Plant", "Power Station", "Fusion Plant", "Zero-Point Core"),
 		age: 10, size: 2, hp: 600, build: 45, cost: Res{0, 120, 80, 40, 0}, energy: 0.6, sight: 3, desc: "Generates energy over time."},
 }
@@ -565,6 +587,87 @@ func buildDefs() {
 			Techs[id] = &TechDef{ID: id, Name: techNames[k][age], Age: age, Kind: k, Amount: amount[k], Cost: c, Time: 25 + 2*float64(age), Desc: desc[k]}
 		}
 	}
+	buildNaval()
+	for _, t := range mapTechs {
+		tt := t
+		Techs[tt.ID] = &tt
+	}
+}
+
+// Map-specific technologies adjust the tree to the terrain.
+var mapTechs = []TechDef{
+	{ID: "irrigation", Name: "Irrigation", Age: 1, Kind: "farm", Amount: 0.5, Cost: Res{150, 150, 0, 0, 0}, Time: 30,
+		Desc: "+50% farm yield. Essential in the desert.", MapTypes: []string{MapDesert, MapRiverland}},
+	{ID: "qanats", Name: "Qanats", Age: 5, Kind: "farm", Amount: 0.4, Cost: Res{300, 200, 200, 100, 0}, Time: 40,
+		Desc: "Underground channels: +40% farm yield.", MapTypes: []string{MapDesert}},
+	{ID: "fishing_nets", Name: "Fishing Nets", Age: 2, Kind: "fish", Amount: 0.3, Cost: Res{100, 150, 0, 50, 0}, Time: 30,
+		Desc: "+30% fishing rate.", MapTypes: []string{MapCoastal, MapRiverland, MapLakes}},
+	{ID: "navigation", Name: "Navigation", Age: 4, Kind: "naval", Amount: 0.2, Cost: Res{200, 250, 0, 150, 0}, Time: 40,
+		Desc: "+20% warship attack and hit points.", MapTypes: []string{MapCoastal, MapRiverland, MapLakes}},
+	{ID: "steam_ships", Name: "Steam Ships", Age: 10, Kind: "naval", Amount: 0.25, Cost: Res{300, 300, 0, 300, 100}, Time: 50,
+		Desc: "+25% warship attack and hit points.", MapTypes: []string{MapCoastal, MapRiverland, MapLakes}},
+	{ID: "deep_mining", Name: "Deep Mining", Age: 3, Kind: "mining", Amount: 0.3, Cost: Res{150, 200, 0, 100, 0}, Time: 35,
+		Desc: "+30% stone and gold mining.", MapTypes: []string{MapHighland, MapDesert}},
+	{ID: "terraces", Name: "Terrace Farming", Age: 2, Kind: "farm", Amount: 0.25, Cost: Res{150, 200, 50, 0, 0}, Time: 30,
+		Desc: "+25% farm yield on hillsides.", MapTypes: []string{MapHighland}},
+	{ID: "caravans", Name: "Caravans", Age: 4, Kind: "gather", Amount: 0.1, Cost: Res{200, 100, 0, 150, 0}, Time: 35,
+		Desc: "+10% gather rate for all resources.", MapTypes: []string{MapDesert, MapInland}},
+}
+
+// naval rosters, by age (no ships before the Neolithic or in space).
+var shipRoster = []unitSpec{
+	{}, {"war_canoe", "War Canoe", "arrow", "ship_oar", "Dugout crewed by archers.", false, 0},
+	{"galley", "Galley", "arrow", "ship_oar", "Oared galley with archers.", false, 0},
+	{"war_galley", "War Galley", "arrow", "ship_oar", "Bronze-rammed war galley.", false, 0},
+	{"bireme", "Bireme", "bolt", "ship_oar", "Two banks of oars and a bow ballista.", false, 0},
+	{"trireme", "Trireme", "bolt", "ship_oar", "The classical ram ship.", false, 0},
+	{"longship", "Longship", "arrow", "ship_oar", "Dragon-prowed raider.", false, 0},
+	{"war_cog", "War Cog", "bolt", "ship_sail", "High-castled sailing warship.", false, 0},
+	{"carrack", "Carrack", "cannonball", "ship_sail", "Ocean-going gun ship.", false, 0.6},
+	{"ship_of_the_line", "Ship of the Line", "cannonball", "ship_sail", "Three decks of cannon.", false, 0.8},
+	{"ironclad", "Ironclad", "shell", "ship_steam", "Steam-powered armoured warship.", false, 0.8},
+	{"battleship", "Battleship", "shell", "ship_steam", "Big-gun dreadnought battleship.", false, 1.0},
+	{"destroyer", "Destroyer", "shell", "ship_modern", "Fast escort with guns and torpedoes.", false, 0.8},
+	{"missile_cruiser", "Missile Cruiser", "missile", "ship_modern", "Guided-missile cruiser.", false, 1.2},
+	{"hover_frigate", "Hover Frigate", "rail", "ship_future", "Ground-effect frigate with railguns.", false, 1.0},
+}
+
+var fisherNames = []string{"", "Dugout", "Fishing Boat", "Fishing Boat", "Fishing Boat", "Fishing Ship", "Fishing Ship", "Fishing Ship",
+	"Fishing Sloop", "Fishing Sloop", "Trawler", "Trawler", "Trawler", "Factory Trawler", "Factory Trawler", "Aqua Drone", "Aqua Drone"}
+
+func buildNaval() {
+	var ships, fishers []string
+	for age := 0; age <= MaxAge; age++ {
+		if age == 0 {
+			ships, fishers = append(ships, ""), append(fishers, "")
+			continue
+		}
+		sc, cs := ageScale(age), costScale(age)
+		fid := fmt.Sprintf("fisher_%d", age)
+		Units[fid] = &UnitDef{ID: fid, Name: fisherNames[age], Class: ClassFisher, Age: age, Era: AgeEra(age), Naval: true,
+			Cost: Res{0, 60, 0, 0, 0}.Scale(cs), HP: math.Round(45 * sc), Range: 0.7, Reload: 1.5, Speed: 1.4, Sight: 5,
+			TrainTime: 14, Pop: 1, TrainedAt: "dock", Sprite: "boat_fish", Desc: "Catches fish and brings it to a dock."}
+		fishers = append(fishers, fid)
+		if age < len(shipRoster) {
+			sp := shipRoster[age]
+			c := Res{20, 110, 0, 45, 0}.Scale(cs)
+			if age < 2 {
+				c[Food] += c[Gold]
+				c[Gold] = 0
+			}
+			if age >= 10 {
+				c[Energy] = math.Round(20 + 8*float64(age-10))
+			}
+			Units[sp.id] = &UnitDef{ID: sp.id, Name: sp.name, Class: ClassNaval, Age: age, Era: AgeEra(age), Naval: true, Cost: c,
+				HP: math.Round(130 * sc), Attack: math.Round(7*sc*10) / 10, Armor: 0.15, Range: 5.5, Reload: 2.2, Speed: 1.45,
+				Sight: 7, TrainTime: 26, Pop: 2, TrainedAt: "dock", Projectile: sp.proj, Splash: sp.splash, Sprite: sp.sprite, Desc: sp.desc}
+			ships = append(ships, sp.id)
+		} else {
+			ships = append(ships, "")
+		}
+	}
+	UnitLine[ClassNaval] = ships
+	UnitLine[ClassFisher] = fishers
 }
 
 // BestUnit returns the most advanced unit id of a class available at age.
@@ -610,6 +713,13 @@ func Counter(att, tgt string) float64 {
 	case ClassWorker:
 		if tgt == ClassBuilding {
 			return 0.3
+		}
+	case ClassNaval:
+		if tgt == ClassBuilding {
+			return 1.3
+		}
+		if tgt == ClassFisher || tgt == ClassNaval {
+			return 1.2
 		}
 	}
 	return 1

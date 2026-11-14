@@ -182,7 +182,10 @@ func sandboxChild() {
 	if err := exec.Command("/bin/true").Run(); err != nil {
 		fmt.Println("exec=blocked")
 	}
-	if err := os.WriteFile(filepath.Join(data, "x"), []byte("ok"), 0o600); err == nil {
+	if err := os.MkdirAll(filepath.Join(data, "saves", "u"), 0o700); err != nil {
+		fmt.Println("mkdir failed:", err)
+	}
+	if err := os.WriteFile(filepath.Join(data, "saves", "u", "x"), []byte("ok"), 0o600); err == nil {
 		fmt.Println("datadir=ok")
 	}
 	if err := os.WriteFile(outside, []byte("no"), 0o600); err != nil {

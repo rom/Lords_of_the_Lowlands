@@ -36,7 +36,18 @@ func (g *Game) walkable(x, y int) bool {
 		return false
 	}
 	i := y*g.W + x
-	return Passable(int(g.Tiles[i])) && g.occ[i] == 0
+	return g.terrainOK(i) && g.occ[i] == 0
+}
+
+// terrainOK reports whether the terrain of tile i suits the current
+// movement domain: ground units walk on land and fords, boats sail on water
+// and fords. The domain is selected by g.navalCtx while a boat is processed.
+func (g *Game) terrainOK(i int) bool {
+	t := int(g.Tiles[i])
+	if g.navalCtx {
+		return t == TWater || t == TShallow
+	}
+	return Passable(t)
 }
 
 // rect is an inclusive tile rectangle used as a path goal.
@@ -125,7 +136,7 @@ func (g *Game) findPath(sx, sy float64, goal rect) []Pt {
 				nx, ny := cx+dx, cy+dy
 				ni := ny*g.W + nx
 				inGoal := goal.contains(nx, ny)
-				if !g.walkable(nx, ny) && !(inGoal && g.inBounds(nx, ny) && Passable(int(g.Tiles[ni]))) {
+				if !g.walkable(nx, ny) && !(inGoal && g.inBounds(nx, ny) && g.terrainOK(ni)) {
 					continue
 				}
 				cost := 1.0
