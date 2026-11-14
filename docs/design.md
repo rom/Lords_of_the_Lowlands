@@ -292,7 +292,7 @@ human on team 1.
 
 Limitation: buildings in explored-but-not-visible areas are reported with
 their *current* state (existence, HP fraction, construction progress)
-rather than the last-seen state. See [security.md](security.md#known-limitations).
+rather than the last-seen state. See [security.md](security.md#35-known-limitations).
 
 ## 9. Pathfinding and movement
 
