@@ -148,14 +148,16 @@ export function buildingSprite(type, era, team, size, stage, live = false) {
   const key = stage < 3 ? `${type}|${era}|-|${size}|${stage}|0` : `${type}|${era}|${team}|${size}|${stage}|${live ? 1 : 0}`;
   let c = bcache.get(key);
   if (c) return c;
+  // backing-store scale: 2x, 3x on high-density displays (zoom goes up to 2)
+  const K = spriteScale();
   const padL = 44, padR = 150, top = 220, bottom = 24 + (type === 'dock' ? 60 : 0);
   const w = size * TW + padL + padR, h = size * TH + top + bottom;
   const ox = size * TW / 2 + padL, oy = top;
-  const W2 = w * 2, H2 = h * 2;
-  if (!scratch || scratch.g.width < W2 || scratch.g.height < H2) scratch = { g: layer(W2, H2), b: layer(W2, H2), c: layer(W2, H2) };
-  const gctx = scratch.g.getContext('2d'), bctx = scratch.b.getContext('2d'), ctx = scratch.c.getContext('2d', { willReadFrequently: true });
-  for (const c2 of [gctx, bctx, ctx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, c2.canvas.width, c2.canvas.height); }
-  for (const c2 of [gctx, bctx]) c2.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
+  const W2 = w * K, H2 = h * K;
+  if (!scratch || scratch.g.width < W2 || scratch.g.height < H2) scratch = { g: layer(W2, H2), b: layer(W2, H2), c: layer(W2, H2), o: layer(W2, H2) };
+  const gctx = scratch.g.getContext('2d'), bctx = scratch.b.getContext('2d'), ctx = scratch.c.getContext('2d', { willReadFrequently: true }), octx = scratch.o.getContext('2d');
+  for (const c2 of [gctx, bctx, ctx, octx]) { c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, c2.canvas.width, c2.canvas.height); }
+  for (const c2 of [gctx, bctx]) c2.setTransform(K, 0, 0, K, ox * K, oy * K);
   setGround(gctx); recStart();
   const flags = stage === 3 && live ? [] : null;
   flagCapture(flags);
@@ -164,10 +166,15 @@ export function buildingSprite(type, era, team, size, stage, live = false) {
     else drawBuildingBody(bctx, type, era, team, size, 0, live);
   } finally { setGround(null); flagCapture(null); }
   const vols = recStop();
+  // soft dark silhouette outline around the body for readability
+  const ow = K * 0.6;
+  for (const [dx, dy] of [[-ow, 0], [ow, 0], [0, -ow], [0, ow]]) octx.drawImage(scratch.b, 0, 0, W2, H2, dx, dy, W2, H2);
+  octx.globalCompositeOperation = 'source-in'; octx.fillStyle = 'rgba(18,14,12,0.5)'; octx.fillRect(0, 0, W2, H2); octx.globalCompositeOperation = 'source-over';
   ctx.drawImage(scratch.g, 0, 0, W2, H2, 0, 0, W2, H2);
-  ctx.setTransform(2, 0, 0, 2, ox * 2, oy * 2);
+  ctx.setTransform(K, 0, 0, K, ox * K, oy * K);
   castShadows(ctx, vols, type === 'farm' ? 0.2 : 0.36);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (type !== 'farm') ctx.drawImage(scratch.o, 0, 0, W2, H2, 0, 0, W2, H2);
   ctx.drawImage(scratch.b, 0, 0, W2, H2, 0, 0, W2, H2);
   // crop to the drawn content to keep the cache small
   let x0 = 0, y0 = 0, x1 = W2, y1 = H2;
@@ -175,15 +182,28 @@ export function buildingSprite(type, era, team, size, stage, live = false) {
     const d = ctx.getImageData(0, 0, W2, H2).data;
     x0 = W2; y0 = H2; x1 = 0; y1 = 0;
     for (let y = 0; y < H2; y += 2) { const row = y * W2 * 4; for (let x = 0; x < W2; x += 2) if (d[row + x * 4 + 3] > 2) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
-    if (x1 < x0) { x0 = 0; y0 = 0; x1 = 2; y1 = 2; }
+    if (x1 < x0) { x0 = 0; y0 = 0; x1 = K; y1 = K; }
     x0 = Math.max(0, x0 - 2); y0 = Math.max(0, y0 - 2); x1 = Math.min(W2, x1 + 4); y1 = Math.min(H2, y1 + 4);
   } catch (e) { /* keep full size */ }
-  x0 &= ~1; y0 &= ~1; x1 = Math.min(W2, x1 + (x1 & 1)); y1 = Math.min(H2, y1 + (y1 & 1));
+  // align the crop to whole logical pixels
+  x0 -= x0 % K; y0 -= y0 % K; x1 = Math.min(W2, x1 + (K - x1 % K) % K); y1 = Math.min(H2, y1 + (K - y1 % K) % K);
   const cv = layer(x1 - x0, y1 - y0);
   cv.getContext('2d').drawImage(scratch.c, x0, y0, x1 - x0, y1 - y0, 0, 0, x1 - x0, y1 - y0);
-  c = { canvas: cv, ox: ox - x0 / 2, oy: oy - y0 / 2, w: (x1 - x0) / 2, h: (y1 - y0) / 2, flags };
+  c = { canvas: cv, ox: ox - x0 / K, oy: oy - y0 / K, w: (x1 - x0) / K, h: (y1 - y0) / K, flags };
   bcache.set(key, c);
   return c;
+}
+let SPK = 0;
+function spriteScale() {
+  if (!SPK) SPK = (typeof window !== 'undefined' && (window.devicePixelRatio || 1) >= 1.5) ? 3 : 2;
+  return SPK;
+}
+// approximate bytes held by the cached building sprites (for diagnostics)
+export function spriteCacheBytes() {
+  let n = 0;
+  for (const c of bcache.values()) n += c.canvas.width * c.canvas.height * 4;
+  for (const c of dcache.values()) n += c.canvas.width * c.canvas.height * 4;
+  return { buildings: bcache.size, damaged: dcache.size, bytes: n };
 }
 
 // Waving flag cloths of a live building sprite (sp.flags, recorded when the
@@ -250,7 +270,7 @@ export function damageSprite(sp, level, key) {
       const d = ctx.getImageData(0, 0, W, H).data;
       for (let i = 0; i < 4; i++) {
         const x = Math.floor(W * (0.2 + rnd(170 + i) * 0.6));
-        for (let y = 0; y < H; y += 2) if (d[(y * W + x) * 4 + 3] > 200) { fire.push([x / 2, y / 2 + 4]); break; }
+        for (let y = 0; y < H; y += 2) if (d[(y * W + x) * 4 + 3] > 200) { fire.push([x * sp.w / W, y * sp.h / H + 4]); break; }
       }
     } catch (e) { fire = []; }
   }
@@ -499,7 +519,8 @@ function spriteBBox(b) {
     for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (d[(y * W + x) * 4 + 3] > 200) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   } catch (e) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
   if (x1 <= x0) { x0 = 0; y0 = 0; x1 = W; y1 = H; }
-  b.bbox = [x0 / 2, y0 / 2, (x1 + 2) / 2, (y1 + 2) / 2];
+  const k = W / b.w;
+  b.bbox = [x0 / k, y0 / k, (x1 + 2) / k, (y1 + 2) / k];
   return b.bbox;
 }
 
@@ -523,7 +544,8 @@ export function iconCanvas(kind, type, def, era, team, themeName, size = 44) {
     const bb = spriteBBox(b);
     const bw = bb[2] - bb[0], bh = bb[3] - bb[1];
     const sc = Math.min((size - 4) / bw, (size - 4) / bh);
-    ctx.drawImage(b.canvas, bb[0] * 2, bb[1] * 2, bw * 2, bh * 2, (size - bw * sc) / 2, (size - bh * sc) / 2 + 1, bw * sc, bh * sc);
+    const k = b.canvas.width / b.w;
+    ctx.drawImage(b.canvas, bb[0] * k, bb[1] * k, bw * k, bh * k, (size - bw * sc) / 2, (size - bh * sc) / 2 + 1, bw * sc, bh * sc);
   } else if (kind === 'resource') {
     const r = resourceSprite(type, themeName, 1);
     if (type === 'fish') { const wg = ctx.createLinearGradient(0, 0, 0, size); wg.addColorStop(0, '#2d6f96'); wg.addColorStop(1, '#1a4a6a'); ctx.fillStyle = wg; ctx.fillRect(0, 0, size, size); }
