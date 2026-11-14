@@ -4,6 +4,43 @@ import { Renderer } from './render.js';
 import { iconCanvas, techIcon, cmdIcon, resIcon, romanNum, RES_COLORS } from './sprites.js';
 import { sfx, playMusic, audioSettings, saveAudio } from './audio.js';
 
+// kindIcon is techIcon plus icons for the map-specific technology kinds
+// (farming, fishing, navy, mining) that techIcon draws as a blank tile.
+function kindIcon(kind, age, size = 44) {
+  const extra = { farm: '#6a7a2a', fish: '#2a5a7a', naval: '#24466e', mining: '#5a4a3a' }[kind];
+  if (!extra) return techIcon(kind, age, size);
+  const cv = document.createElement('canvas');
+  cv.width = size * 2; cv.height = size * 2;
+  const c = cv.getContext('2d'); c.scale(2, 2);
+  const g = c.createLinearGradient(0, 0, 0, size);
+  g.addColorStop(0, extra); g.addColorStop(1, '#141210');
+  c.fillStyle = g; c.fillRect(0, 0, size, size);
+  c.translate(size / 2, size / 2); c.scale(size / 44, size / 44);
+  c.strokeStyle = '#f0e2c0'; c.fillStyle = '#f0e2c0'; c.lineWidth = 2.5; c.lineCap = 'round'; c.lineJoin = 'round';
+  switch (kind) {
+    case 'farm': // wheat sheaf
+      for (const a of [-0.35, 0, 0.35]) { c.save(); c.rotate(a); c.beginPath(); c.moveTo(0, 12); c.lineTo(0, -6); c.stroke();
+        for (let i = 0; i < 4; i++) { c.beginPath(); c.ellipse(0, -8 + i * 4, 2.2, 3.2, 0, 0, 7); c.fill(); } c.restore(); }
+      break;
+    case 'fish':
+      c.beginPath(); c.ellipse(-2, 0, 10, 6, 0, 0, 7); c.fill();
+      c.beginPath(); c.moveTo(7, 0); c.lineTo(13, -6); c.lineTo(13, 6); c.closePath(); c.fill();
+      c.fillStyle = extra; c.beginPath(); c.arc(-7, -1.5, 1.6, 0, 7); c.fill();
+      break;
+    case 'naval': // anchor
+      c.beginPath(); c.arc(0, -9, 3, 0, 7); c.stroke();
+      c.beginPath(); c.moveTo(0, -6); c.lineTo(0, 11); c.moveTo(-6, -2); c.lineTo(6, -2); c.stroke();
+      c.beginPath(); c.arc(0, 2, 10, 0.25 * Math.PI, 0.75 * Math.PI); c.stroke();
+      break;
+    case 'mining': // pick over ore
+      c.beginPath(); c.moveTo(-9, 10); c.lineTo(7, -6); c.stroke();
+      c.beginPath(); c.moveTo(-2, -11); c.quadraticCurveTo(8, -12, 13, -3); c.stroke();
+      c.beginPath(); c.moveTo(-12, 12); c.lineTo(-4, 6); c.lineTo(4, 12); c.closePath(); c.fill();
+      break;
+  }
+  return cv;
+}
+
 // hkName renders a hotkey for display.
 function hkName(k) { return k === 'delete' ? 'Del' : k === 'escape' ? 'Esc' : k.toUpperCase(); }
 
@@ -25,6 +62,7 @@ export const SHORTCUTS = [
   ['General', [
     ['? / F1', 'Show or hide this help'],
     ['F10', 'Game menu'],
+    ['F2  or  Y', 'Your tech tree (click a technology to research it)'],
     ['Esc', 'Cancel placement / back / close window / clear selection'],
     ['Enter', 'Open chat (Tab switches All / Team / Global)'],
     ['Ctrl+S', 'Quick save (registered players)'],
@@ -125,6 +163,7 @@ export class GameClient {
     const age = this.spectator ? Math.max(0, ...s.players.map(p => p.g)) : s.age;
     if (age !== this.age) { this.age = age; playMusic(this.defs.ages[this.age].era); this.menuDirty = true; }
     this.techs = new Set(s.techs || []);
+    if (this.modal === 'tech' && now - (this.techT || 0) > 1000) this.techTree(true);
     this.players = s.players;
     const seen = new Set();
     for (const v of s.ents) {
@@ -268,6 +307,7 @@ export class GameClient {
     this.selEl = $('#selinfo');
     this.cmdEl = $('#commands');
     this.tip = $('#tooltip');
+    document.body.append(this.tip); // not inside #game, so it can show above windows
     this.chatLog = $('#gamechat');
     this.chatIn = $('#chatinput');
     this.chatCh = 'room';
@@ -337,7 +377,7 @@ export class GameClient {
     if (e.k === 1 && e.q && e.q.length) {
       const qd = el('div', { class: 'queue' });
       e.q.forEach((q, i) => {
-        const c = q.u ? iconCanvas('unit', q.u, this.defs.units[q.u], this.defs.units[q.u].era, e.o, this.map.theme, 30) : techIcon(q.a ? 'age' : this.defs.techs[q.t]?.kind, q.a ? this.age + 2 : 0, 30);
+        const c = q.u ? iconCanvas('unit', q.u, this.defs.units[q.u], this.defs.units[q.u].era, e.o, this.map.theme, 30) : kindIcon(q.a ? 'age' : this.defs.techs[q.t]?.kind, q.a ? this.age + 2 : 0, 30);
         c.className = 'qitem'; c.title = 'Click to cancel';
         const cell = el('div', { class: 'qcell', onclick: () => { this.send({ c: 'cancel', t: e.i, i }); sfx('click'); } }, c);
         if (i === 0) cell.append(el('div', { class: 'qprog' }, el('div', { style: `width:${Math.round(q.p * 100)}%` })));
@@ -370,7 +410,8 @@ export class GameClient {
   // removes the element without a mouseleave event.
   tipWatchdog() {
     if (!this.tipAnchor) return;
-    if (!this.tipAnchor.isConnected || !this.tipAnchor.matches(':hover') || !$('#overlay').classList.contains('hidden')) this.hideTip();
+    const inOverlay = this.tipAnchor.closest && this.tipAnchor.closest('#overlay');
+    if (!this.tipAnchor.isConnected || !this.tipAnchor.matches(':hover') || (!inOverlay && !$('#overlay').classList.contains('hidden'))) this.hideTip();
   }
 
   showTip(title, lines, anchor) {
@@ -379,7 +420,8 @@ export class GameClient {
     this.tip.classList.remove('hidden');
     const r = anchor.getBoundingClientRect();
     this.tip.style.left = Math.max(8, Math.min(window.innerWidth - 280, r.left - 100)) + 'px';
-    this.tip.style.top = (r.top - this.tip.offsetHeight - 8) + 'px';
+    const above = r.top - this.tip.offsetHeight - 8;
+    this.tip.style.top = (above >= 8 ? above : Math.min(window.innerHeight - this.tip.offsetHeight - 8, r.bottom + 8)) + 'px';
   }
 
   buildCost(id) {
@@ -453,7 +495,7 @@ export class GameClient {
       for (const t of ids) {
         if (seenKind.has(t.kind)) continue; // show next tech of each kind
         seenKind.add(t.kind);
-        out.push(this.button(techIcon(t.kind, t.age), t.name, [`Cost: ${this.costText(t.cost)}`, t.desc, `Requires ${this.defs.ages[t.age].name}`], () => this.send({ c: 'research', t: b.i, w: t.id }), { key: key(), poor: !this.canAfford(t.cost) }));
+        out.push(this.button(kindIcon(t.kind, t.age), t.name, [`Cost: ${this.costText(t.cost)}`, t.desc, `Requires ${this.defs.ages[t.age].name}`], () => this.send({ c: 'research', t: b.i, w: t.id }), { key: key(), poor: !this.canAfford(t.cost) }));
       }
     }
     out.push(this.button(cmdIcon('delete'), 'Delete Building', ['Destroys this building'], () => this.ask('Delete building?', `${b.def.name} will be destroyed. This cannot be undone.`, 'Delete', () => this.send({ c: 'delete', ids: [b.i] }), { danger: true }), { key: 'delete' }));
@@ -541,6 +583,7 @@ export class GameClient {
     });
     on($('#menubtn'), 'click', () => this.gameMenu());
     on($('#helpbtn'), 'click', () => this.helpOverlay());
+    on($('#techbtn'), 'click', () => this.techTree());
   }
 
   gameMenu() {
@@ -548,6 +591,7 @@ export class GameClient {
       el('h2', { text: 'Game Menu' }),
       el('button', { class: 'btn', text: 'Resume', onclick: () => this.closeOverlay() }),
       this.canSave() ? el('button', { class: 'btn', text: 'Save Game', onclick: () => this.saveDialog() }) : null,
+      this.spectator ? null : el('button', { class: 'btn', text: 'Tech Tree (F2)', onclick: () => this.techTree() }),
       el('button', { class: 'btn', text: 'Keyboard Shortcuts (?)', onclick: () => this.helpOverlay() }),
       el('button', { class: 'btn', text: 'Settings', onclick: () => this.app.showSettings() }),
       this.spectator ? null : el('button', { class: 'btn danger', text: 'Resign', onclick: () => this.ask('Resign?', 'You will lose this game.', 'Resign', () => this.send({ c: 'resign' }), { danger: true }) }),
@@ -597,6 +641,125 @@ export class GameClient {
     const name = `${this.level.name} — ${fmtTime(this.snap ? this.snap.time : 0)}`;
     if (quick) { this.net.send({ t: 'save', name: 'Quick save: ' + name }); this.toast('Quick save…'); return; }
     this.ask('Save game', 'Name this saved game:', 'Save', (v) => { if (v) this.net.send({ t: 'save', name: v }); }, { input: name });
+  }
+
+  // ------------------------------------------------------------ tech tree
+  // techTree shows the player's own tree: one column per age, rows for the
+  // age advance, buildings, every unit line and every technology line. Each
+  // cell is coloured by status; clicking an available technology queues it
+  // at the least busy academy. refresh re-renders in place (scroll kept).
+  techTree(refresh) {
+    if (this.spectator || this.over) return;
+    if (!refresh && this.modal === 'tech') { this.closeOverlay(); return; }
+    this.techT = performance.now();
+    const D = this.defs, me = this.you, maxAge = this.map.maxAge, age = this.age;
+    const theme = this.map.theme, mt = this.map.mapType;
+    const own = [...this.ents.values()].filter(e => e.o === me && e.k === 1);
+    const queued = new Map(); // tech id or 'age' -> progress 0..1
+    for (const b of own) (b.q || []).forEach((q, i) => { const k = q.a ? 'age' : q.t; if (k) queued.set(k, i === 0 ? q.p || 0 : 0); });
+    const academies = own.filter(b => b.t === 'academy' && !(b.p > 0));
+    const ages = D.ages.slice(0, maxAge + 1);
+    const eraOf = (a) => D.ages[a].era;
+
+    // status: done | now (available) | busy (queued) | later (future age in this level) | off (not on this map)
+    const cell = (status, icon, title, lines, onclick, prog) => {
+      const c = el('div', { class: 'tt-cell ' + status }, icon);
+      if (status === 'done') c.append(el('span', { class: 'tt-badge', text: '✓' }));
+      if (status === 'busy') c.append(el('div', { class: 'tt-prog' }, el('div', { style: `width:${Math.round((prog || 0) * 100)}%` })));
+      c.addEventListener('mouseenter', () => this.showTip(title, lines, c));
+      c.addEventListener('mouseleave', () => this.hideTip());
+      if (onclick) { c.classList.add('click'); c.addEventListener('click', (ev) => { ev.stopPropagation(); onclick(); }); }
+      return c;
+    };
+    const rows = [];
+    // every age column is a fixed-width .tt-col so rows line up with the header
+    const row = (label, cells, sub) => rows.push(el('div', { class: 'tt-row' + (sub ? ' sub' : '') }, el('div', { class: 'tt-label', text: label }), ...cells.map(c => el('div', { class: 'tt-col' }, c))));
+
+    // age advance
+    row('Age', ages.map((a, i) => {
+      const st = i <= age ? 'done' : queued.has('age') && i === age + 1 ? 'busy' : i === age + 1 ? 'now' : 'later';
+      const lines = [a.years, a.desc, i > 0 ? `Advance: ${this.costText(a.advanceCost)}` : 'Starting age',
+        st === 'now' ? 'Advance at your town centre' : st === 'busy' ? 'Advancing…' : ''];
+      return cell(st, techIcon('age', i + 1, 40), `${romanNum(i + 1)}. ${a.name}`, lines, null, queued.get('age'));
+    }));
+    // buildings unlocked per age
+    row('Buildings', ages.map((a, i) => {
+      const ids = Object.keys(D.buildings).filter(id => D.buildings[id].age === i && !(id === 'dock' && !this.map.naval));
+      const box = el('div', { class: 'tt-stack' });
+      for (const id of ids) {
+        const d = D.buildings[id], era = eraOf(Math.max(i, Math.min(age, maxAge)));
+        const name = D.buildingNames[id]?.[era] || d.name;
+        box.append(cell(i <= age ? 'done' : 'later', iconCanvas('building', id, d, era, me, theme, 32), name,
+          [d.desc, `Cost: ${this.costText(this.buildCost(id))}`, i <= age ? 'Available' : `Requires ${D.ages[i].name}`]));
+      }
+      return box;
+    }), true);
+    // unit lines
+    const LINES = [['worker', 'Workers'], ['infantry', 'Infantry'], ['ranged', 'Ranged'], ['mounted', 'Mounted'], ['siege', 'Siege'], ['naval', 'Warships'], ['fisher', 'Fishing boats']];
+    for (const [cls, label] of LINES) {
+      const line = D.unitLine[cls];
+      if (!line || ((cls === 'naval' || cls === 'fisher') && !this.map.naval)) continue;
+      const current = bestUnit(D, cls, age);
+      row(label, ages.map((a, i) => {
+        const id = line[i];
+        if (!id) return el('div', { class: 'tt-cell empty' });
+        const u = D.units[id];
+        const st = id === current ? 'now' : i <= age ? 'done old' : 'later';
+        return cell(st, iconCanvas('unit', id, u, u.era, me, theme, 40), u.name,
+          [u.desc, `Cost: ${this.costText(u.cost)}`, `HP ${u.hp} · Attack ${u.attack} · Range ${u.range}`,
+            st === 'now' ? 'Your current unit — train it now' : i <= age ? 'Upgraded to a newer unit' : `Requires ${D.ages[i].name}`]);
+      }));
+    }
+    // technology lines (one row per kind)
+    const KINDS = [['attack', 'Attack'], ['armor', 'Armour'], ['hp', 'Hit points'], ['gather', 'Gathering'], ['mining', 'Mining'], ['farm', 'Farming'], ['fish', 'Fishing tech'], ['naval', 'Naval tech']];
+    const techs = Object.values(D.techs);
+    for (const [kind, label] of KINDS) {
+      const list = techs.filter(t => t.kind === kind);
+      if (!list.length) continue;
+      if (list.every(t => t.mapTypes && !t.mapTypes.includes(mt))) continue;
+      row(label, ages.map((a, i) => {
+        const here = list.filter(t => t.age === i).sort((x, y) => x.id.localeCompare(y.id));
+        if (!here.length) return el('div', { class: 'tt-cell empty' });
+        const box = el('div', { class: here.length > 1 ? 'tt-stack' : 'tt-one' });
+        for (const t of here) {
+          const offMap = t.mapTypes && !t.mapTypes.includes(mt);
+          const st = this.techs.has(t.id) ? 'done' : offMap ? 'off' : queued.has(t.id) ? 'busy' : t.age <= age ? 'now' : 'later';
+          const can = st === 'now' && academies.length > 0;
+          const hint = st === 'done' ? 'Researched' : st === 'busy' ? 'Researching…' : offMap ? 'Not available on this map type'
+            : st === 'later' ? `Requires ${D.ages[t.age].name}` : academies.length ? (this.canAfford(t.cost) ? 'Click to research' : 'Click to research (not enough resources yet)') : `Researched at the ${D.buildingNames.academy?.[eraOf(age)] || 'academy'} — build one first`;
+          box.append(cell(st + (can && !this.canAfford(t.cost) ? ' poor' : ''), kindIcon(t.kind, t.age, here.length > 1 ? 30 : 40), t.name,
+            [t.desc, `Cost: ${this.costText(t.cost)}`, hint],
+            can ? () => {
+              const b = academies.slice().sort((x, y) => (x.q ? x.q.length : 0) - (y.q ? y.q.length : 0))[0];
+              this.send({ c: 'research', t: b.i, w: t.id }); sfx('click'); this.toast(`Researching ${t.name}`);
+              setTimeout(() => { if (this.modal === 'tech') this.techTree(true); }, 300);
+            } : null, queued.get(t.id)));
+        }
+        return here.length > 1 ? box : box.firstChild;
+      }));
+    }
+    const done = techs.filter(t => this.techs.has(t.id)).length;
+    const avail = techs.filter(t => !t.mapTypes || t.mapTypes.includes(mt)).filter(t => t.age <= maxAge).length;
+    const head = el('div', { class: 'tt-row tt-head' }, el('div', { class: 'tt-label' }),
+      ...ages.map((a, i) => el('div', { class: 'tt-age' + (i === age ? ' cur' : i < age ? ' past' : ''), title: a.years },
+        el('b', { text: romanNum(i + 1) }), el('span', { text: a.name.replace(/ Age$/, '') }))));
+    const legend = el('div', { class: 'tt-legend' }, ...[['done', 'Done'], ['now', 'Available now'], ['busy', 'In progress'], ['later', 'Later age'], ['off', 'Not on this map']]
+      .map(([c, t]) => el('span', {}, el('i', { class: 'tt-cell ' + c }), t)));
+    const old = $('#overlay .tt-grid');
+    const scroll = old ? [old.scrollLeft, old.scrollTop] : null;
+    const grid = el('div', { class: 'tt-grid' }, head, ...rows);
+    const box = el('div', { class: 'panel tech-box' },
+      el('div', { class: 'help-head' },
+        el('h2', { text: 'Your Tech Tree' }),
+        el('div', { class: 'tt-sum', text: `${D.ages[age].name} · ${done} of ${avail} technologies researched${academies.length ? '' : ' · no academy yet'}` }),
+        el('button', { class: 'btn small', text: 'Close (Esc)', onclick: () => this.closeOverlay() })),
+      legend, grid);
+    if (refresh && this.modal === 'tech') { $('#overlay').replaceChildren(box); } else this.openOverlay(box, 'tech');
+    if (scroll) { grid.scrollLeft = scroll[0]; grid.scrollTop = scroll[1]; }
+    else { // start with the current age in view
+      const cur = grid.querySelector('.tt-age.cur');
+      if (cur) grid.scrollLeft = Math.max(0, cur.offsetLeft - 260);
+    }
   }
 
   helpOverlay() {
@@ -760,6 +923,7 @@ export class GameClient {
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === '?' || k === 'f1' || (k === '/' && e.shiftKey)) { e.preventDefault(); this.helpOverlay(); return; }
+    if (k === 'f2' || (k === 'y' && !e.shiftKey && !ctrl)) { e.preventDefault(); this.techTree(); return; }
     // while a window is open only its own keys work
     if (this.overlayOpen()) {
       if (k === 'escape' || (k === 'f10' && this.modal === 'menu')) { e.preventDefault(); this.closeOverlay(); }
