@@ -1,7 +1,7 @@
 // Isometric renderer: procedural terrain chunks, animated water, entities,
 // effects, fog of war and minimap.
 import { TW, TH, ZH, TEAM, iso, fbm, vnoise, hash2, clamp, shade } from './util.js';
-import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite } from './sprites.js';
+import { theme, buildingSprite, buildingAnimated, drawBuildingAnim, resourceSprite, drawUnit, smokePoints, P, damageSprite, rubbleSprite, TREE_VARIANTS } from './sprites.js';
 import { decorateChunk } from './art/terrain.js';
 import { isFootUnit } from './art/units.js';
 
@@ -541,7 +541,8 @@ export class Renderer {
       if (e.k === 2) {
         const rd = this.defs && this.defs.resources ? this.defs.resources[e.t] : null;
         const lvl = e.a != null && rd && rd.amount ? Math.max(1, Math.min(4, Math.ceil(e.a / rd.amount * 4))) : 4;
-        const s = resourceSprite(e.t, this.themeName, e.v || 0, e.t === 'tree' ? 4 : lvl);
+        const vr = e.t === 'tree' && e.i != null ? ((e.i * 2654435761) >>> 0) % TREE_VARIANTS : e.v || 0;
+        const s = resourceSprite(e.t, this.themeName, vr, e.t === 'tree' ? 4 : lvl);
         const k = e.t === 'tree' ? 1 : 0.9;
         if (e.t === 'fish') {
           // gentle drift and an expanding ripple

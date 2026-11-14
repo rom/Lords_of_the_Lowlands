@@ -5,6 +5,9 @@ import { recStart, recStop, castShadows, setGround } from './art/kit.js';
 import { drawShip } from './art/naval.js';
 import { drawBuildingBody, drawConstruction, drawAnim, hasAnim } from './art/buildings.js';
 import { drawHuman, drawUnitFig } from './art/units.js';
+import { drawTree, TREE_VARIANTS } from './art/flora.js';
+
+export { TREE_VARIANTS };
 
 // ---------------------------------------------------------------- palettes
 // terrain: grass, dirt, sand, water, mountain, shallow, road
@@ -319,14 +322,16 @@ export function resourceSprite(type, themeName, variant, level = 4) {
   const key = `${type}|${themeName}|${variant}|${level}`;
   let c = rcache.get(key);
   if (c) return c;
-  const w = 96, h = 120;
+  const tree = type === 'tree';
+  const w = tree ? 128 : 96, h = tree ? 136 : 120, ax = tree ? 50 : w / 2, ay = tree ? 114 : h - 22;
   const cv = document.createElement('canvas');
   cv.width = w * 2; cv.height = h * 2;
   const ctx = cv.getContext('2d');
   ctx.scale(2, 2);
-  ctx.translate(w / 2, h - 22);
-  drawResource(ctx, type, theme(themeName).tree, variant, level);
-  c = { canvas: cv, ox: w / 2, oy: h - 22, w, h };
+  ctx.translate(ax, ay);
+  if (tree) drawTree(ctx, theme(themeName).tree, themeName, variant);
+  else drawResource(ctx, type, theme(themeName).tree, variant, level);
+  c = { canvas: cv, ox: ax, oy: ay, w, h };
   rcache.set(key, c);
   return c;
 }
@@ -343,64 +348,6 @@ function drawResource(ctx, type, treeStyle, v, level = 4) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath(); ctx.ellipse(4, 2, 16, 7, 0, 0, 7); ctx.fill();
   switch (type) {
-    case 'tree': {
-      const style = treeStyle === 'mixed' ? (rnd(1) < 0.5 ? 'oak' : 'pine') : treeStyle;
-      const sc = 0.85 + rnd(2) * 0.35;
-      ctx.save(); ctx.scale(sc, sc);
-      if (style === 'oak') {
-        // trunk with bark shading and two limbs
-        const tg = ctx.createLinearGradient(-3, 0, 3, 0); tg.addColorStop(0, '#7a5434'); tg.addColorStop(1, '#3a2414');
-        ctx.fillStyle = tg; ctx.beginPath(); ctx.moveTo(-3.2, 0); ctx.lineTo(-2, -26); ctx.lineTo(2, -26); ctx.lineTo(3.2, 0); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = '#3a2414'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-6, -27); ctx.moveTo(0, -21); ctx.lineTo(5, -29); ctx.stroke();
-        const base = [[42, 92, 30], [58, 110, 36], [74, 128, 44]][Math.floor(rnd(3) * 3)];
-        const bl = [];
-        for (let i = 0; i < 8; i++) { const a = i / 8 * 6.28 + rnd(4), r = 8 + rnd(5 + i) * 5; bl.push([Math.cos(a) * 9, -36 + Math.sin(a) * 6.5 - rnd(9 + i) * 6, r]); }
-        bl.push([0, -43, 11]); bl.push([-3, -48, 8]);
-        // dark outline pass, then lit blobs from back to front
-        ctx.fillStyle = 'rgba(16,28,10,0.85)';
-        for (const [x, y, r] of bl) { ctx.beginPath(); ctx.arc(x, y, r + 1.2, 0, 7); ctx.fill(); }
-        bl.sort((p, q) => p[1] - q[1]);
-        for (const [x, y, r] of bl) blob(ctx, x, y, r, rgb(base[0] * 0.62, base[1] * 0.66, base[2] * 0.62), rgb(base[0] * 1.45, base[1] * 1.38, base[2] * 1.2));
-        // leaf speckle and a shaded underside
-        for (let i = 0; i < 26; i++) { const x = (rnd(100 + i) - 0.5) * 30, y = -50 + rnd(130 + i) * 24; ctx.fillStyle = rnd(160 + i) < 0.5 ? 'rgba(255,255,200,0.18)' : 'rgba(0,20,0,0.22)'; ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 7); ctx.fill(); }
-      } else if (style === 'pine' || style === 'snowpine') {
-        ctx.fillStyle = '#4a2f1a'; ctx.fillRect(-2, -14, 4, 14);
-        for (let i = 0; i < 4; i++) {
-          const y = -12 - i * 11, w = 15 - i * 3;
-          ctx.fillStyle = shade([30, 78, 44], 0.85 + i * 0.1);
-          ctx.beginPath(); ctx.moveTo(-w, y); ctx.quadraticCurveTo(0, y + 3, w, y); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill();
-          ctx.strokeStyle = 'rgba(10,26,14,0.8)'; ctx.lineWidth = 0.9; ctx.stroke();
-          ctx.strokeStyle = 'rgba(160,220,150,0.25)'; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.moveTo(-w * 0.8, y - 1); ctx.lineTo(-1, y - 16); ctx.stroke();
-          ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill();
-          if (style === 'snowpine') { ctx.fillStyle = 'rgba(245,250,255,0.92)'; ctx.beginPath(); ctx.moveTo(-w * 0.7, y - 4); ctx.lineTo(w * 0.3, y - 6); ctx.lineTo(0, y - 18); ctx.closePath(); ctx.fill(); }
-        }
-      } else if (style === 'palm' || style === 'jungle') {
-        ctx.strokeStyle = '#7a5a34'; ctx.lineWidth = 3.5;
-        const lean = (rnd(6) - 0.5) * 10;
-        ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(lean * 0.3, -22, lean, -44); ctx.stroke();
-        ctx.strokeStyle = 'rgba(60,40,20,0.6)'; ctx.lineWidth = 1;
-        for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.moveTo(-2 + lean * i / 8, -i * 5.5); ctx.lineTo(2 + lean * i / 8, -i * 5.5 - 1); ctx.stroke(); }
-        const g = style === 'jungle' ? [40, 120, 40] : [70, 130, 50];
-        for (let i = 0; i < 7; i++) {
-          const a = i / 7 * 6.28;
-          ctx.fillStyle = shade(g, 0.8 + rnd(10 + i) * 0.4);
-          ctx.beginPath(); ctx.moveTo(lean, -44);
-          ctx.quadraticCurveTo(lean + Math.cos(a) * 14, -54 + Math.sin(a) * 4, lean + Math.cos(a) * 24, -40 + Math.sin(a) * 8);
-          ctx.quadraticCurveTo(lean + Math.cos(a) * 12, -46 + Math.sin(a) * 4, lean, -44); ctx.fill();
-        }
-        if (style === 'jungle') blob(ctx, -8, -14, 9, '#2a6a28', '#5aa048');
-      } else { // crystal spires (off-world "wood")
-        const hue = [[120, 80, 220], [60, 200, 200], [200, 90, 200]][Math.floor(rnd(7) * 3)];
-        for (let i = 0; i < 4; i++) {
-          const x = (rnd(20 + i) - 0.5) * 18, hh = 18 + rnd(30 + i) * 30, w = 4 + rnd(40 + i) * 3;
-          ctx.fillStyle = shade(hue, 0.6); ctx.beginPath(); ctx.moveTo(x - w, 0); ctx.lineTo(x, -hh); ctx.lineTo(x, 0); ctx.fill();
-          ctx.fillStyle = shade(hue, 1.2); ctx.beginPath(); ctx.moveTo(x + w, 0); ctx.lineTo(x, -hh); ctx.lineTo(x, 0); ctx.fill();
-        }
-        ctx.fillStyle = `rgba(${hue[0]},${hue[1]},${hue[2]},0.25)`; ctx.beginPath(); ctx.arc(0, -20, 18, 0, 7); ctx.fill();
-      }
-      ctx.restore();
-      break;
-    }
     case 'berry': {
       const space = treeStyle === 'crystal';
       const leafD = space ? '#2a6a50' : '#2f5e26', leafL = space ? '#7cf0b0' : '#5e9c44';
