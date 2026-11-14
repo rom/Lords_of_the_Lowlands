@@ -13,6 +13,7 @@ type AI struct {
 	nextAttack int
 	attacking  bool
 	waveSize   int
+	wave       map[int]bool // units committed to the current attack
 	thinks     int
 	stageUntil int
 	lastBuild  map[string]int
@@ -66,6 +67,7 @@ type aiState struct {
 	pending   map[string]int
 	byRes     [NumRes]int
 	fishers   []*Entity
+	ships     []*Entity // warships: steered by naval(), never by the land army
 }
 
 func (a *AI) survey(g *Game, p *Player) *aiState {
@@ -94,6 +96,8 @@ func (a *AI) survey(g *Game, p *Player) *aiState {
 				}
 			} else if e.U.Class == ClassFisher {
 				s.fishers = append(s.fishers, e)
+			} else if e.U.Naval {
+				s.ships = append(s.ships, e)
 			} else {
 				s.military = append(s.military, e)
 			}
@@ -127,6 +131,7 @@ func (s *aiState) tcY(g *Game) float64 {
 
 func (a *AI) think(g *Game, p *Player) {
 	s := a.survey(g, p)
+	a.fleet(g, p, s)
 	if s.tc == nil {
 		// try to rebuild the town centre
 		if len(s.workers) > 0 && s.pending["town_center"] == 0 {
@@ -415,10 +420,20 @@ func itoa(i int) string {
 }
 
 func (a *AI) military(g *Game, p *Player, s *aiState) {
-	minArmy := 4 + p.Age/3
+	// The army the AI keeps building even while saving for the next age; it
+	// grows with game time so long games still see regular attacks.
+	minutes := float64(g.Tick) / TickRate / 60
+	minArmy := 4 + p.Age/3 + int(minutes/4)
+	if minArmy > a.attackSize+p.Age/2 {
+		minArmy = a.attackSize + p.Age/2
+	}
 	var reserve Res
-	if p.Age < g.Level.MaxAge && len(s.military) >= minArmy && len(s.workers) >= 10+p.Age/2 {
-		reserve = AgeCost(p.Age) // saving up for the next age
+	if p.Age < g.Level.MaxAge && len(s.workers) >= 10+p.Age/2 {
+		// saving up for the next age once a minimal army stands, or when
+		// the advance is mostly paid for already
+		if c := AgeCost(p.Age); len(s.military) >= minArmy || p.Res.Covers(c.Scale(0.6)) {
+			reserve = c
+		}
 	}
 	for _, kind := range []string{"barracks", "range", "stable", "workshop"} {
 		for _, b := range s.buildings[kind] {
@@ -446,19 +461,34 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 			break
 		}
 	}
-	if threat != nil && !a.attacking && a.prof.Defend {
+	if threat != nil && a.prof.Defend {
+		// everyone at home defends; an attack wave in the field carries on
 		for _, m := range s.military {
-			if m.Order == OIdle || m.Order == OMove {
+			if (m.Order == OIdle || m.Order == OMove) && !(a.attacking && a.wave[m.ID]) {
 				g.smart(m, threat, CmdAttack)
 			}
 		}
-		return
+		if !a.attacking {
+			return
+		}
 	}
-	minutes := float64(g.Tick) / TickRate / 60
-	if !a.attacking && len(s.military) >= a.attackSize+p.Age/2 && g.Tick >= a.nextAttack && minutes > a.prof.FirstAttack {
+	// Long games escalate: after 40 minutes a smaller army is enough to
+	// attack, so matches end instead of turning into a standoff.
+	need := a.attackSize + p.Age/2
+	if minutes > 40 {
+		need -= int((minutes - 40) / 3)
+	}
+	if need < 6 {
+		need = 6
+	}
+	if !a.attacking && len(s.military) >= need && g.Tick >= a.nextAttack && minutes > a.prof.FirstAttack {
 		a.attacking = true
 		a.waveSize = len(s.military)
 		a.attackSize += 2
+		a.wave = map[int]bool{}
+		for _, m := range s.military {
+			a.wave[m.ID] = true
+		}
 		// stage the army together part-way to the target first
 		if t := a.pickTarget(g, p, s.tcX(g), s.tcY(g)); t != nil {
 			sx, sy := s.tcX(g)+(t.X-s.tcX(g))*0.55, s.tcY(g)+(t.Y-s.tcY(g))*0.55
@@ -474,18 +504,52 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 		return
 	}
 	if a.attacking {
-		if len(s.military) < a.waveSize/3+1 {
+		// Only the committed wave fights; recruits trained meanwhile wait at
+		// home for the next, larger wave instead of trickling into towers
+		// one at a time. A wave restored from a saved game (no member list)
+		// adopts the current army.
+		if a.wave == nil {
+			a.wave = map[int]bool{}
+		}
+		// mop-up: once the enemy has lost every town centre, everyone joins
+		if len(a.wave) == 0 || !g.hostileHasTC(p.Index) {
+			for _, m := range s.military {
+				a.wave[m.ID] = true
+			}
+		}
+		var wave, home []*Entity
+		for _, m := range s.military {
+			if a.wave[m.ID] {
+				wave = append(wave, m)
+			} else {
+				home = append(home, m)
+			}
+		}
+		for id := range a.wave {
+			if e := g.Ents[id]; e == nil || e.dead {
+				delete(a.wave, id)
+			}
+		}
+		if s.tc != nil {
+			for _, m := range home {
+				if m.Order == OIdle && math.Hypot(m.X-s.tc.X, m.Y-s.tc.Y) > 12 {
+					g.orderMove(m, s.tc.X+3, s.tc.Y+3, true)
+				}
+			}
+		}
+		if len(wave) < a.waveSize/3+1 {
 			// the wave is spent: regroup at home
 			a.attacking = false
+			a.wave = nil
 			a.nextAttack = g.Tick + 600
 			if s.tc != nil {
-				for _, m := range s.military {
+				for _, m := range wave {
 					g.orderMove(m, s.tc.X+3, s.tc.Y+3, true)
 				}
 			}
 			return
 		}
-		for _, m := range s.military {
+		for _, m := range wave {
 			if m.Order == OIdle || m.Order == OMove {
 				if t := a.pickTarget(g, p, m.X, m.Y); t != nil {
 					g.orderMove(m, t.X, t.Y, true)
@@ -531,6 +595,75 @@ func (a *AI) pickTarget(g *Game, p *Player, ox, oy float64) *Entity {
 		}
 	}
 	return best
+}
+
+// fleet sends idle warships after the nearest enemy they can reach by
+// water: ships and fishing boats first, then anything on a shore.
+func (a *AI) fleet(g *Game, p *Player, s *aiState) {
+	if len(s.ships) == 0 {
+		return
+	}
+	var idle []*Entity
+	for _, m := range s.ships {
+		if m.Order == OIdle {
+			idle = append(idle, m)
+		}
+	}
+	if len(idle) == 0 {
+		return
+	}
+	// one target for the whole idle squadron, chosen from its centre
+	cx, cy := 0.0, 0.0
+	for _, m := range idle {
+		cx += m.X
+		cy += m.Y
+	}
+	cx, cy = cx/float64(len(idle)), cy/float64(len(idle))
+	var best *Entity
+	bd := 1e9
+	for _, e := range g.Ents {
+		if e.dead || !g.hostile(p.Index, e.Owner) || e.Kind == KResource {
+			continue
+		}
+		d := math.Hypot(e.X-cx, e.Y-cy)
+		if e.Kind == KUnit && e.U.Naval {
+			d *= 0.5 // enemy ships and fishing boats first
+		} else if !g.nearWater(e.X, e.Y, 4) {
+			continue // out of reach from the water
+		}
+		if d < bd {
+			bd, best = d, e
+		}
+	}
+	if best == nil {
+		return
+	}
+	for _, m := range idle {
+		g.orderMove(m, best.X, best.Y, true)
+	}
+}
+
+// hostileHasTC reports whether any enemy of player still has a town centre.
+func (g *Game) hostileHasTC(player int) bool {
+	for _, e := range g.Ents {
+		if !e.dead && e.Kind == KBuilding && e.Type == "town_center" && g.hostile(player, e.Owner) {
+			return true
+		}
+	}
+	return false
+}
+
+// nearWater reports whether there is open water within r tiles of (x, y).
+func (g *Game) nearWater(x, y float64, r int) bool {
+	cx, cy := int(x), int(y)
+	for ty := cy - r; ty <= cy+r; ty++ {
+		for tx := cx - r; tx <= cx+r; tx++ {
+			if g.inBounds(tx, ty) && g.Tiles[ty*g.W+tx] == TWater {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // naval runs the AI's fishing fleet and navy on maps with water.

@@ -785,8 +785,20 @@ func TestPathfinding(t *testing.T) {
 	if g.findPath(-5, -5, rect{1, 1, 1, 1}) != nil || g.findPath(10.5, 10.5, rect{10, 10, 10, 10}) != nil {
 		t.Fatal("degenerate paths")
 	}
-	if g.findPath(10.5, 10.5, rect{16, 3, 16, 3}) != nil {
-		t.Fatal("closed goal")
+	// a goal that cannot be stood on (inside the wall) leads next to it
+	if p3 := g.findPath(10.5, 10.5, rect{16, 3, 16, 3}); len(p3) == 0 {
+		t.Fatal("blocked goal: no path to its edge")
+	} else if l := p3[len(p3)-1]; math.Hypot(l.X-16.5, l.Y-3.5) > 2 {
+		t.Fatalf("blocked goal: path ends at %.1f,%.1f, not beside it", l.X, l.Y)
+	}
+	// deep inside solid rock there is nothing to approach
+	for y := 0; y < 32; y++ {
+		for x := 20; x < 32; x++ {
+			g.Tiles[y*32+x] = TMountain
+		}
+	}
+	if g.findPath(10.5, 10.5, rect{29, 16, 29, 16}) != nil {
+		t.Fatal("enclosed goal")
 	}
 	if !(rect{0, 0, 2, 2}).contains(1, 1) || (rect{0, 0, 2, 2}).dist(5, 5) <= 0 {
 		t.Fatal("rect")
@@ -993,4 +1005,56 @@ func TestSnapshotDeltaResources(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Attack-move onto a building's own tile used to find no path at all, so
+// armies ordered at a town centre stood still forever.
+func TestAttackMoveOntoBuilding(t *testing.T) {
+	g := newGame(t, flatLevel(), false)
+	b := g.placeBuilding("barracks", 1, 16, 16, true)
+	u := g.spawnUnit("clubman", 0, 12.5, 3.5)
+	g.orderMove(u, b.X, b.Y, true)
+	hp := b.HP
+	for i := 0; i < 600 && b.HP == hp; i++ {
+		g.Step()
+	}
+	if b.HP == hp {
+		t.Fatalf("unit never reached the building: at %.1f,%.1f order=%d", u.X, u.Y, u.Order)
+	}
+}
+
+// Ships alone do not keep a player in the game.
+func TestShipsAloneAreDefeated(t *testing.T) {
+	g := newGame(t, flatLevel(), false)
+	for _, e := range g.Ents {
+		if e.Owner == 1 {
+			g.remove(e)
+		}
+	}
+	g.spawnUnit("war_canoe", 1, 3, 3)
+	g.checkVictory()
+	if !g.Players[1].Defeated || !g.Over || g.Winner != g.Players[0].Team {
+		t.Fatalf("defeated=%v over=%v winner=%d", g.Players[1].Defeated, g.Over, g.Winner)
+	}
+}
+
+// Two computer players on a small map must finish the game.
+func TestAIGameFinishes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long simulation")
+	}
+	l := &Level{ID: "ai-finish", Name: "AI finish", Theme: "temperate", Width: 64, Height: 64, StartAge: 0, MaxAge: 3,
+		Objective: Objective{Type: ObjConquest}, MaxPlayers: 2, MapType: MapInland,
+		Gen: &GenParams{Seed: 31, Water: 0.2, Mountains: 0.3, Forest: 0.5, Animals: 0.5, Riches: 0.5}}
+	g, err := NewGame(l, []PlayerSetup{{Name: "A", Team: 0, AI: true, Difficulty: "hard"}, {Name: "B", Team: 1, AI: true, Difficulty: "normal"}}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 120*60*TickRate && !g.Over; i++ {
+		g.Step()
+	}
+	if !g.Over {
+		t.Fatalf("no winner after %d minutes", g.Tick/TickRate/60)
+	}
+	t.Logf("finished after %.0f minutes", float64(g.Tick)/TickRate/60)
 }

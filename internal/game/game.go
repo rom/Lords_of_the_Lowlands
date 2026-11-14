@@ -1623,7 +1623,9 @@ func (g *Game) updateVisibility() {
 
 func (g *Game) alive(p *Player) bool {
 	for _, e := range g.Ents {
-		if e.Owner == p.Index && (e.Kind == KUnit || (e.Kind == KBuilding && e.Type != "farm" && e.Type != "house")) {
+		// a player is alive while they have a land unit or a building other
+		// than houses and farms; ships alone cannot hold out forever
+		if e.Owner == p.Index && ((e.Kind == KUnit && !e.U.Naval) || (e.Kind == KBuilding && e.Type != "farm" && e.Type != "house")) {
 			return true
 		}
 	}

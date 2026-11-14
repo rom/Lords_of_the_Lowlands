@@ -83,7 +83,18 @@ func (g *Game) findPath(sx, sy float64, goal rect) []Pt {
 		return nil
 	}
 	if !g.goalOpen(goal) {
-		return nil
+		// The destination cannot be stood on (inside a building, a forest or
+		// a crowd): head for the nearest ring around it that can.
+		grown := false
+		for r := 1; r <= 6 && !grown; r++ {
+			e := rect{goal.x0 - r, goal.y0 - r, goal.x1 + r, goal.y1 + r}
+			if g.goalOpen(e) {
+				goal, grown = e, true
+			}
+		}
+		if !grown || goal.contains(sxi, syi) {
+			return nil
+		}
 	}
 	n := g.W * g.H
 	if len(g.pathG) != n {

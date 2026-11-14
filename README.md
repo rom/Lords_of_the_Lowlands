@@ -180,6 +180,7 @@ Press **`?`** (or `F1`, or the **?** button) in a game for the full shortcut she
 | Camera | arrow keys, screen edge, minimap, wheel or `+`/`-` to zoom, `0` reset, `Space` last alert, `Backspace` selection |
 | Chat | `Enter`, `Tab` switches All / Team / Global |
 | Menu / quick save / mute / help | `F10` / `Ctrl+S` / `Shift+M` / `?` |
+| Your tech tree (click a tech to research it) | `F2` / `Y` / *Tech Tree* button |
 
 Gather food and wood early, build houses before you are housed, add drop-off camps near resources,
 research at the academy, and save up to **advance the age** at the town centre — every age unlocks

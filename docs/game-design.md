@@ -28,7 +28,14 @@ flowchart LR
 - **Advancing an age** at the town centre unlocks the next unit of every
   line, new buildings and technologies and restyles your whole civilisation.
 - **Win** by the level's objective: conquest, survival or being first to
-  advance.
+  advance. In a conquest a player is out once they have no land units and no
+  buildings other than houses and farms left — surviving ships alone do not
+  keep a player in the game.
+- **Plan** with your own tech tree (`F2`, `Y` or the *Tech Tree* button): one
+  column per age, rows for the age advance, buildings, every unit line and
+  every technology line, coloured by status (done, available now, in
+  progress, later age, not on this map). Clicking an available technology
+  researches it at your least busy academy.
 
 ## Resources
 
@@ -495,9 +502,18 @@ Six difficulty levels:
 same rules as you — it pays for everything and obeys the population cap; up
 to *hard* it sees only what its units see. It attacks in waves, gathers its
 army half-way before striking, retreats to regroup when a wave is spent and
-grows each subsequent wave by two. It defends its town centre against
-intruders and rebuilds it if it falls. On naval maps it builds a dock,
-fishes and later trains warships.
+grows each subsequent wave by two. Soldiers trained during an attack wait at
+home for the next, larger wave instead of trickling into enemy towers; once
+every enemy town centre has fallen, everyone joins in to finish the game.
+It keeps a growing standing army while saving for the next age, and after 40
+minutes it attacks with ever smaller armies, so long games do not stall. It
+defends its town centre against intruders and rebuilds it if it falls. On
+naval maps it builds a dock, fishes and later trains warships, which hunt
+enemy ships, fishing boats and anything on a shore.
+
+In simulated computer-vs-computer games (2 players, 64×64 to 208×208, every
+map type, normal to insane) a winner is decided in 25–80 minutes; super-easy
+computers, which attack late with large armies, take longer.
 
 ## Scoring
 
@@ -529,5 +545,6 @@ The complete list lives in one table (`SHORTCUTS` in `web/js/game.js`) and is sh
 | Space / Backspace | jump to last attack alert / centre on selection |
 | Enter / Tab | open chat / switch channel (All, Team, Global) |
 | F10 / Ctrl+S / Shift+M / ? or F1 | game menu / quick save / mute / shortcut help |
+| F2 or Y | your tech tree |
 
 Editor: 1–7 terrain, Shift+1–9 objects, E eraser, P start position, [ ] brush size, G grid, N new, Ctrl+Z undo, Ctrl+S save, ? help.
