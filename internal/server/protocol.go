@@ -47,7 +47,7 @@ var validTypes = map[string]bool{
 	"start": true, "quick": true, "cmd": true, "ping": true,
 }
 
-var validDiff = map[string]bool{"": true, "easy": true, "normal": true, "hard": true}
+func validDiffName(d string) bool { return game.ValidDifficulty(d) }
 
 // ParseClientMsg decodes and validates an untrusted client message.
 func ParseClientMsg(b []byte) (*ClientMsg, error) {
@@ -61,7 +61,7 @@ func ParseClientMsg(b []byte) (*ClientMsg, error) {
 	if !validTypes[m.T] {
 		return nil, errors.New("unknown message type")
 	}
-	if !validDiff[m.Diff] {
+	if !validDiffName(m.Diff) {
 		return nil, errors.New("bad difficulty")
 	}
 	if m.Team < 0 || m.Team > 8 || m.Slot < 0 || m.Slot >= game.MaxPlayers || m.Opp < 0 || m.Opp > 7 {

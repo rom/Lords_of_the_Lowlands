@@ -70,7 +70,13 @@ func TestDefsComplete(t *testing.T) {
 		if age >= 3 && BestUnit(ClassSiege, age) == "" {
 			t.Fatalf("no siege at age %d", age)
 		}
-		if len(SortedTechs(age)) != 4*(age+1) {
+		generic := 0
+		for _, id := range SortedTechs(age) {
+			if len(Techs[id].MapTypes) == 0 {
+				generic++
+			}
+		}
+		if generic != 4*(age+1) {
 			t.Fatalf("tech count at age %d", age)
 		}
 	}
@@ -169,7 +175,7 @@ func TestLevelValidate(t *testing.T) {
 		func(l *Level) { l.Objective = Objective{Type: ObjAdvance}; l.MaxAge = 0 },
 		func(l *Level) { l.StartRes = Res{-1} },
 		func(l *Level) { l.StartRes = Res{math.NaN()} },
-		func(l *Level) { l.Difficulty = "insane" },
+		func(l *Level) { l.Difficulty = "godmode" },
 		func(l *Level) { l.Tiles = "0" },
 		func(l *Level) { l.Tiles = strings.Repeat("9", 1024) },
 		func(l *Level) { l.Objects = []Object{{"dragon", 1, 1}} },
@@ -205,7 +211,7 @@ func TestLevelValidate(t *testing.T) {
 	if err := s.Validate(); err != nil || s.Opponents != 1 {
 		t.Fatal("opponents clamp", err)
 	}
-	if len(ObjectKinds()) != 8 || Passable(TWater) || !Passable(TShallow) {
+	if len(ObjectKinds()) != 9 || Passable(TWater) || !Passable(TShallow) {
 		t.Fatal("kinds/passable")
 	}
 }

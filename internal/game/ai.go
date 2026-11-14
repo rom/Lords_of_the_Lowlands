@@ -16,17 +16,45 @@ type AI struct {
 	thinks     int
 	stageUntil int
 	lastBuild  map[string]int
+	prof       DifficultyProfile
+	dockSpot   bool
+}
+
+// Difficulty levels, from gentlest to most brutal.
+var Difficulties = []string{"super_easy", "easy", "normal", "hard", "super_hard", "insane"}
+
+// DifficultyProfile tunes an AI opponent.
+type DifficultyProfile struct {
+	Bonus       float64 // gather/build/train speed multiplier
+	AttackSize  int     // army size before the first wave
+	FirstAttack float64 // minutes before the first wave
+	Trickle     float64 // free resources per second (each kind)
+	FullVision  bool    // sees the whole map
+	Defend      bool    // reacts to raids
+}
+
+// Profiles maps difficulty names to their tuning.
+var Profiles = map[string]DifficultyProfile{
+	"super_easy": {Bonus: 0.55, AttackSize: 20, FirstAttack: 12},
+	"easy":       {Bonus: 0.75, AttackSize: 14, FirstAttack: 7, Defend: true},
+	"normal":     {Bonus: 1.0, AttackSize: 10, FirstAttack: 4, Defend: true},
+	"hard":       {Bonus: 1.3, AttackSize: 8, FirstAttack: 3.5, Defend: true},
+	"super_hard": {Bonus: 1.6, AttackSize: 7, FirstAttack: 3, Trickle: 0.3, Defend: true},
+	"insane":     {Bonus: 2.0, AttackSize: 6, FirstAttack: 2.5, Trickle: 0.8, FullVision: true, Defend: true},
+}
+
+// ValidDifficulty reports whether d names a difficulty level ("" means normal).
+func ValidDifficulty(d string) bool {
+	_, ok := Profiles[d]
+	return ok || d == ""
 }
 
 func newAI(diff string) *AI {
-	a := &AI{Difficulty: diff, bonus: 1, attackSize: 10, lastBuild: map[string]int{}}
-	switch diff {
-	case "easy":
-		a.bonus, a.attackSize = 0.75, 14
-	case "hard":
-		a.bonus, a.attackSize = 1.3, 8
+	pr, ok := Profiles[diff]
+	if !ok {
+		diff, pr = "normal", Profiles["normal"]
 	}
-	return a
+	return &AI{Difficulty: diff, prof: pr, bonus: pr.Bonus, attackSize: pr.AttackSize, lastBuild: map[string]int{}}
 }
 
 type aiState struct {
@@ -37,6 +65,7 @@ type aiState struct {
 	buildings map[string][]*Entity
 	pending   map[string]int
 	byRes     [NumRes]int
+	fishers   []*Entity
 }
 
 func (a *AI) survey(g *Game, p *Player) *aiState {
@@ -63,6 +92,8 @@ func (a *AI) survey(g *Game, p *Player) *aiState {
 					}
 					s.byRes[res]++
 				}
+			} else if e.U.Class == ClassFisher {
+				s.fishers = append(s.fishers, e)
 			} else {
 				s.military = append(s.military, e)
 			}
@@ -106,6 +137,7 @@ func (a *AI) think(g *Game, p *Player) {
 	}
 	a.economy(g, p, s)
 	a.construct(g, p, s)
+	a.naval(g, p, s)
 	a.research(g, p, s)
 	a.military(g, p, s)
 }
@@ -294,6 +326,12 @@ func (a *AI) findSpot(g *Game, p *Player, size int, x, y float64) (int, int, boo
 			if tx < 1 || ty < 1 || tx+size >= g.W-1 || ty+size >= g.H-1 || !p.Explored[ty*g.W+tx] {
 				continue
 			}
+			if a.dockSpot {
+				if g.footprintFree(tx, ty, size, false) && g.coastal(tx, ty, size) {
+					return tx, ty, true
+				}
+				continue
+			}
 			// keep a one-tile margin for paths
 			if g.footprintFree(tx-1, ty-1, size+2, true) && g.footprintFree(tx, ty, size, false) {
 				return tx, ty, true
@@ -417,7 +455,7 @@ func (a *AI) military(g *Game, p *Player, s *aiState) {
 		return
 	}
 	minutes := float64(g.Tick) / TickRate / 60
-	if !a.attacking && len(s.military) >= a.attackSize+p.Age/2 && g.Tick >= a.nextAttack && minutes > 4 {
+	if !a.attacking && len(s.military) >= a.attackSize+p.Age/2 && g.Tick >= a.nextAttack && minutes > a.prof.FirstAttack {
 		a.attacking = true
 		a.waveSize = len(s.military)
 		a.attackSize += 2
@@ -493,4 +531,51 @@ func (a *AI) pickTarget(g *Game, p *Player, ox, oy float64) *Entity {
 		}
 	}
 	return best
+}
+
+// naval runs the AI's fishing fleet and navy on maps with water.
+func (a *AI) naval(g *Game, p *Player, s *aiState) {
+	if !g.Naval || Buildings["dock"].Age > p.Age || s.tc == nil {
+		return
+	}
+	docks := s.buildings["dock"]
+	if len(docks) == 0 {
+		if s.pending["dock"] > 0 || len(s.workers) < 8 || g.Tick-a.lastBuild["dock"] < 400 {
+			return
+		}
+		// nearest shore to the town centre
+		bx, by, bd := 0.0, 0.0, 30.0
+		for y := 0; y < g.H; y++ {
+			for x := 0; x < g.W; x++ {
+				if g.Tiles[y*g.W+x] == TWater && p.Explored[y*g.W+x] {
+					if d := math.Hypot(float64(x)-s.tc.X, float64(y)-s.tc.Y); d < bd {
+						bx, by, bd = float64(x), float64(y), d
+					}
+				}
+			}
+		}
+		if bd < 30 {
+			a.dockSpot = true
+			if a.build(g, p, s, "dock", bx, by) {
+				a.lastBuild["dock"] = g.Tick
+			}
+			a.dockSpot = false
+		}
+		return
+	}
+	dock := docks[0]
+	if len(s.fishers) < 3+p.Age/3 && len(dock.Queue) < 2 && p.Pop < p.PopCap {
+		_ = g.queueUnit(p, dock, ClassFisher)
+	} else if len(dock.Queue) == 0 && len(s.military) > 4 && p.Res.Covers(AgeCost(p.Age).Scale(0.5)) {
+		_ = g.queueUnit(p, dock, ClassNaval)
+	}
+	g.navalCtx = true
+	for _, f := range s.fishers {
+		if f.Order == OIdle {
+			if r := g.nearestResource(f.X, f.Y, Food, 40, nil); r != nil {
+				g.orderGather(f, r)
+			}
+		}
+	}
+	g.navalCtx = false
 }

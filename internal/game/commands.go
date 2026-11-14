@@ -159,6 +159,9 @@ func (g *Game) Apply(c Command) error {
 		if !p.Explored[ty*g.W+tx] || !g.footprintFree(tx, ty, d.Size, false) {
 			return ErrPlacement
 		}
+		if d.ID == "dock" && (!g.Naval || !g.coastal(tx, ty, d.Size)) {
+			return ErrPlacement
+		}
 		cost := g.buildCost(p, d)
 		if !p.Res.Covers(cost) {
 			return ErrCannotAfford
@@ -321,7 +324,7 @@ func (g *Game) queueResearch(p *Player, b *Entity, what string) error {
 		return nil
 	}
 	t := Techs[what]
-	if t == nil || t.Age > p.Age || p.Techs[what] || !b.B.Research {
+	if t == nil || t.Age > p.Age || p.Techs[what] || !b.B.Research || !t.AllowedOn(g.Level.MapType) {
 		return ErrAge
 	}
 	for _, e := range g.Ents {
@@ -344,6 +347,23 @@ func (g *Game) queueResearch(p *Player, b *Entity, what string) error {
 // smart dispatches a context-sensitive order for one unit.
 func (g *Game) smart(u *Entity, t *Entity, kind string) {
 	isWorker := u.U.Class == ClassWorker
+	if u.U.Class == ClassFisher {
+		if t.Kind == KResource && t.Type == "fish" || t.Kind == KBuilding && t.Type == "dock" && t.Owner == u.Owner {
+			if t.Kind == KResource {
+				g.orderGather(u, t)
+			} else {
+				u.Order, u.Target = OGather, 0
+				u.Path = nil
+			}
+			return
+		}
+		g.orderMove(u, t.X, t.Y, false)
+		return
+	}
+	if isWorker && t.Kind == KResource && t.Type == "fish" {
+		g.orderMove(u, t.X, t.Y, false) // workers cannot fish
+		return
+	}
 	switch {
 	case t.Kind == KResource && isWorker && kind != CmdAttack:
 		g.orderGather(u, t)
@@ -380,7 +400,7 @@ func (g *Game) orderMove(u *Entity, x, y float64, amove bool) {
 }
 
 func (g *Game) orderGather(u *Entity, t *Entity) {
-	if u.U.Class != ClassWorker {
+	if u.U.Class != ClassWorker && !(u.U.Class == ClassFisher && t.Type == "fish") {
 		return
 	}
 	if t.Kind == KUnit {
@@ -415,9 +435,25 @@ func (g *Game) formationMove(us []*Entity, x, y float64, amove bool) {
 		ox := (float64(c) - float64(cols-1)/2) * sp
 		oy := (float64(r) - float64((n-1)/cols)/2) * sp
 		tx, ty := clamp(x+ox, 0.5, float64(g.W)-0.5), clamp(y+oy, 0.5, float64(g.H)-0.5)
+		g.navalCtx = u.U.Naval
 		if !u.U.Flying && !g.walkable(int(tx), int(ty)) {
 			tx, ty = x, y
 		}
+		g.navalCtx = false
 		g.orderMove(u, tx, ty, amove)
 	}
+}
+
+// coastal reports whether a footprint at (tx,ty) touches open water on at
+// least two tiles, so boats can reach a dock built there.
+func (g *Game) coastal(tx, ty, n int) bool {
+	c := 0
+	for y := ty - 1; y <= ty+n; y++ {
+		for x := tx - 1; x <= tx+n; x++ {
+			if (x == tx-1 || x == tx+n || y == ty-1 || y == ty+n) && g.inBounds(x, y) && g.Tiles[y*g.W+x] == TWater {
+				c++
+			}
+		}
+	}
+	return c >= 2
 }

@@ -140,6 +140,10 @@ type Player struct {
 	Visible    []bool
 	Explored   []bool
 	gatherMul  float64
+	farmMul    float64
+	fishMul    float64
+	navalMul   float64
+	miningMul  float64
 	attackMul  float64
 	armorAdd   float64
 	hpMul      float64
@@ -203,7 +207,11 @@ type Game struct {
 	pathMark   []int32
 	pathNodes  []*node
 	pathClosed []int32
-	pathGen    int32
+	navalCtx   bool // movement domain of the unit being processed
+	// Naval is true when the map has navigable water (docks, fishing, ships).
+	Naval    bool
+	farmBase float64
+	pathGen  int32
 }
 
 // Errors returned by Apply.
@@ -232,9 +240,23 @@ func NewGame(lv *Level, setups []PlayerSetup, seed int64) (*Game, error) {
 		g.Tiles[i] = l.Tiles[i] - '0'
 	}
 	g.occ = make([]int32, g.W*g.H)
+	water := 0
+	for _, t := range g.Tiles {
+		if t == TWater {
+			water++
+		}
+	}
+	g.Naval = Earthly(l.Theme) && l.MapType != MapDesert && water*50 >= len(g.Tiles)
+	g.farmBase = 1
+	switch l.MapType {
+	case MapDesert:
+		g.farmBase = 0.6
+	case MapRiverland:
+		g.farmBase = 1.15
+	}
 	for i, s := range setups {
 		p := &Player{Index: i, Name: s.Name, Team: s.Team, Color: i, AI: s.AI, Difficulty: s.Difficulty,
-			Res: l.StartRes, Age: l.StartAge, Techs: map[string]bool{}, gatherMul: 1, attackMul: 1, hpMul: 1,
+			Res: l.StartRes, Age: l.StartAge, Techs: map[string]bool{}, gatherMul: 1, attackMul: 1, hpMul: 1, farmMul: 1, fishMul: 1, navalMul: 1, miningMul: 1,
 			Visible: make([]bool, g.W*g.H), Explored: make([]bool, g.W*g.H)}
 		if p.Res.Total() == 0 {
 			p.Res = Res{200, 200, 150, 100, 0}.Scale(1 + 0.4*float64(l.StartAge))
@@ -334,6 +356,9 @@ func (g *Game) spawnUnit(typ string, owner int, x, y float64) *Entity {
 	mul := 1.0
 	if owner >= 0 {
 		mul = g.Players[owner].hpMul
+		if d.Naval {
+			mul *= g.Players[owner].navalMul
+		}
 		e.Age = g.Players[owner].Age
 	}
 	e.MaxHP = d.HP * mul
@@ -378,7 +403,7 @@ func (g *Game) placeBuilding(typ string, owner, tx, ty int, complete bool) *Enti
 	p := g.Players[owner]
 	e.Age = p.Age
 	e.MaxHP = d.HP * (1 + 0.2*float64(p.Age)) * p.hpMul
-	e.Food = d.Food * (1 + 0.25*float64(p.Age))
+	e.Food = d.Food * (1 + 0.25*float64(p.Age)) * g.farmBase * p.farmMul
 	if complete {
 		e.Built = true
 		e.Progress = 1
@@ -508,6 +533,13 @@ func (g *Game) Step() {
 	g.Tick++
 	g.buildGrid()
 	for _, p := range g.Players {
+		if p.ai != nil && !p.Defeated && p.ai.prof.Trickle > 0 {
+			for r := 0; r < NumRes; r++ {
+				if r != Energy || p.Age >= 10 {
+					p.Res[r] += p.ai.prof.Trickle * DT
+				}
+			}
+		}
 		if p.ai != nil && !p.Defeated && (g.Tick+p.Index*3)%10 == 0 {
 			p.ai.think(g, p)
 		}
@@ -526,7 +558,9 @@ func (g *Game) Step() {
 		}
 		switch e.Kind {
 		case KUnit:
+			g.navalCtx = e.U.Naval
 			g.stepUnit(e)
+			g.navalCtx = false
 		case KBuilding:
 			g.stepBuilding(e)
 		}
@@ -626,17 +660,19 @@ func (g *Game) stepBuilding(e *Entity) {
 	e.Queue = e.Queue[1:]
 	switch {
 	case item.Unit != "":
+		g.navalCtx = Units[item.Unit].Naval
+		defer func() { g.navalCtx = false }()
 		x, y, _ := g.freeSpotNear(e.X, e.Y, float64(e.B.Size)/2+0.7)
 		u := g.spawnUnit(item.Unit, p.Index, x, y)
 		p.Trained++
 		g.emit(Event{K: "trained", X: x, Y: y, O: p.Index, P: item.Unit})
 		if e.HasRally {
-			if t := g.entityAt(e.RallyX, e.RallyY); t != nil && t.Kind == KResource && u.U.Class == ClassWorker {
+			if t := g.entityAt(e.RallyX, e.RallyY); t != nil && t.Kind == KResource && (u.U.Class == ClassWorker || u.U.Class == ClassFisher) {
 				g.orderGather(u, t)
 			} else {
 				g.orderMove(u, e.RallyX, e.RallyY, false)
 			}
-		} else if u.U.Class == ClassWorker {
+		} else if u.U.Class == ClassWorker || u.U.Class == ClassFisher {
 			if r := g.nearestResource(u.X, u.Y, -1, 12, nil); r != nil {
 				g.orderGather(u, r)
 			}
@@ -662,6 +698,21 @@ func (g *Game) applyTech(p *Player, id string) {
 	switch t.Kind {
 	case "gather":
 		p.gatherMul += t.Amount
+	case "farm":
+		p.farmMul += t.Amount
+	case "fish":
+		p.fishMul += t.Amount
+	case "mining":
+		p.miningMul += t.Amount
+	case "naval":
+		old := p.navalMul
+		p.navalMul += t.Amount
+		for _, e := range g.Ents {
+			if e.Owner == p.Index && e.U != nil && e.U.Naval {
+				e.MaxHP *= p.navalMul / old
+				e.HP *= p.navalMul / old
+			}
+		}
 	case "attack":
 		p.attackMul += t.Amount
 	case "armor":
@@ -751,6 +802,9 @@ func (g *Game) nearestResource(x, y float64, res int, maxD float64, exclude *Ent
 		if res >= 0 && e.R.Res != res {
 			continue
 		}
+		if (e.Type == "fish") != g.navalCtx {
+			continue // boats fish; land workers cannot reach the water
+		}
 		if e.R.Block && !g.goalOpen(goalFor(e)) {
 			continue
 		}
@@ -770,6 +824,9 @@ func (g *Game) nearestDropoff(u *Entity, res int) *Entity {
 	bd := 1e9
 	for _, e := range g.Ents {
 		if e.Kind != KBuilding || e.Owner != u.Owner || !e.Built {
+			continue
+		}
+		if u.U != nil && u.U.Naval && e.Type != "dock" {
 			continue
 		}
 		ok := false
@@ -1243,6 +1300,12 @@ func (g *Game) gatherRate(u *Entity, r *ResourceDef) float64 {
 	if u.Owner >= 0 {
 		p := g.Players[u.Owner]
 		base *= p.gatherMul * (1 + 0.06*float64(p.Age))
+		switch r.ID {
+		case "fish":
+			base *= p.fishMul
+		case "gold", "stone":
+			base *= p.miningMul
+		}
 		if p.ai != nil {
 			base *= p.ai.bonus
 		}
@@ -1424,7 +1487,7 @@ func (g *Game) separate() {
 			}
 			for j := i + 1; j < len(cell); j++ {
 				b := g.Ents[cell[j]]
-				if b == nil || b.Kind != KUnit || b.dead || a.U.Flying != b.U.Flying {
+				if b == nil || b.Kind != KUnit || b.dead || a.U.Flying != b.U.Flying || a.U.Naval != b.U.Naval {
 					continue
 				}
 				dx, dy := b.X-a.X, b.Y-a.Y
@@ -1437,11 +1500,13 @@ func (g *Game) separate() {
 					push := (min - d) / 2 * 0.5
 					ax, ay := a.X-dx/d*push, a.Y-dy/d*push
 					bx, by := b.X+dx/d*push, b.Y+dy/d*push
+					g.navalCtx = a.U.Naval
 					if a.U.Flying || g.walkable(int(ax), int(ay)) {
 						if !a.Busy {
 							a.X, a.Y = ax, ay
 						}
 					}
+					g.navalCtx = b.U.Naval
 					if b.U.Flying || g.walkable(int(bx), int(by)) {
 						if !b.Busy {
 							b.X, b.Y = bx, by
@@ -1454,6 +1519,7 @@ func (g *Game) separate() {
 			}
 		}
 	}
+	g.navalCtx = false
 }
 
 // ---------------------------------------------------------------------------
@@ -1506,6 +1572,11 @@ func (g *Game) updateVisibility() {
 	for _, p := range g.Players {
 		v := teamVis[p.Team]
 		copy(p.Visible, v)
+		if p.ai != nil && p.ai.prof.FullVision {
+			for i := range p.Visible {
+				p.Visible[i] = true
+			}
+		}
 		for i, b := range v {
 			if b {
 				p.Explored[i] = true

@@ -24,6 +24,62 @@ const (
 // Themes change the look of terrain and resources.
 var Themes = []string{"temperate", "desert", "winter", "tropical", "moon", "mars", "space"}
 
+// Map types shape the terrain and adjust the technology tree.
+const (
+	MapInland    = "inland"
+	MapCoastal   = "coastal"
+	MapRiverland = "riverland"
+	MapLakes     = "lakes"
+	MapDesert    = "desert"
+	MapHighland  = "highland"
+)
+
+// MapTypes lists the selectable map types.
+var MapTypes = []string{MapInland, MapCoastal, MapRiverland, MapLakes, MapDesert, MapHighland}
+
+// ValidMapType reports whether t names a map type ("" means inland).
+func ValidMapType(t string) bool {
+	for _, m := range MapTypes {
+		if m == t {
+			return true
+		}
+	}
+	return t == ""
+}
+
+// Earthly reports whether a theme has seas that boats can sail.
+func Earthly(theme string) bool { return theme != "moon" && theme != "mars" && theme != "space" }
+
+// NavalMap reports whether docks, fishing and warships exist on a map type.
+func NavalMap(mapType, theme string) bool {
+	return Earthly(theme) && (mapType == MapCoastal || mapType == MapRiverland || mapType == MapLakes)
+}
+
+// forMapType returns generator parameters adjusted for a map type.
+func (g *GenParams) forMapType(t string) *GenParams {
+	c := *g
+	switch t {
+	case MapCoastal:
+		c.Water = math.Min(c.Water, 0.25)
+	case MapRiverland:
+		c.River = true
+		c.Water = math.Min(c.Water, 0.3)
+	case MapLakes:
+		c.Water = math.Max(c.Water, 0.6)
+		c.River = false
+	case MapDesert:
+		c.Water, c.River = 0, false
+		c.Forest *= 0.3
+		c.Animals *= 0.4
+		c.Riches = math.Min(1, c.Riches+0.4)
+	case MapHighland:
+		c.Mountains = math.Max(c.Mountains, 0.65)
+		c.Water *= 0.4
+		c.Riches = math.Min(1, c.Riches+0.3)
+	}
+	return &c
+}
+
 // Objective types.
 const (
 	ObjConquest = "conquest"
@@ -78,6 +134,7 @@ type Level struct {
 	Objects     []Object   `json:"objects,omitempty"`
 	Starts      []Point    `json:"starts,omitempty"`
 	MaxPlayers  int        `json:"maxPlayers"`
+	MapType     string     `json:"mapType,omitempty"`
 	Opponents   int        `json:"opponents,omitempty"`
 	Difficulty  string     `json:"difficulty,omitempty"`
 	Gen         *GenParams `json:"gen,omitempty"`
@@ -94,11 +151,11 @@ const (
 	MaxLevelBytes = 512 * 1024
 )
 
-var objectKinds = map[string]bool{"tree": true, "berry": true, "gold": true, "stone": true, "crystal": true, "deer": true, "boar": true, "mammoth": true}
+var objectKinds = map[string]bool{"fish": true, "tree": true, "berry": true, "gold": true, "stone": true, "crystal": true, "deer": true, "boar": true, "mammoth": true}
 
 // ObjectKinds returns the valid object kinds for levels.
 func ObjectKinds() []string {
-	return []string{"tree", "berry", "gold", "stone", "crystal", "deer", "boar", "mammoth"}
+	return []string{"tree", "berry", "gold", "stone", "crystal", "fish", "deer", "boar", "mammoth"}
 }
 
 func validTheme(t string) bool {
@@ -174,11 +231,16 @@ func (l *Level) Validate() error {
 			return fmt.Errorf("invalid start resource %d", i)
 		}
 	}
-	switch l.Difficulty {
-	case "", "normal":
+	if !ValidMapType(l.MapType) {
+		return fmt.Errorf("unknown map type %q", l.MapType)
+	}
+	if l.MapType == "" {
+		l.MapType = MapInland
+	}
+	if l.Difficulty == "" {
 		l.Difficulty = "normal"
-	case "easy", "hard":
-	default:
+	}
+	if !ValidDifficulty(l.Difficulty) {
 		return errors.New("invalid difficulty")
 	}
 	if l.Gen != nil && l.Tiles == "" {
@@ -247,7 +309,7 @@ func (l *Level) Materialize(players int) *Level {
 	if players > l.MaxPlayers && l.MaxPlayers >= 2 {
 		players = l.MaxPlayers
 	}
-	tiles, objs, starts := generate(l.Width, l.Height, players, g, l.Theme, l.StartAge)
+	tiles, objs, starts := generate(l.Width, l.Height, players, g, l.Theme, l.MapType, l.StartAge)
 	out.Tiles = tiles
 	out.Objects = objs
 	out.Starts = starts
@@ -297,7 +359,8 @@ func (n *noise) fbm(x, y float64, oct int) float64 {
 }
 
 // generate builds a map. It is deterministic for a given seed.
-func generate(w, h, players int, g *GenParams, theme string, age int) (string, []Object, []Point) {
+func generate(w, h, players int, gp *GenParams, theme, mapType string, age int) (string, []Object, []Point) {
+	g := gp.forMapType(mapType)
 	r := rand.New(rand.NewSource(g.Seed))
 	nz := newNoise(r)
 	nz2 := newNoise(r)
@@ -307,6 +370,13 @@ func generate(w, h, players int, g *GenParams, theme string, age int) (string, [
 	cx, cy := float64(w)/2, float64(h)/2
 	rad := math.Min(cx, cy) * 0.68
 	off := r.Float64() * math.Pi * 2
+	// coastal maps: an ocean along one side, the ring shifted inland
+	oceanA := off + math.Pi/4
+	if mapType == MapCoastal {
+		cx -= math.Cos(oceanA) * float64(w) * 0.17
+		cy -= math.Sin(oceanA) * float64(h) * 0.17
+		rad = math.Min(float64(w), float64(h)) * 0.25
+	}
 	for i := range starts {
 		a := off + float64(i)*2*math.Pi/float64(players)
 		starts[i] = Point{int(cx + math.Cos(a)*rad), int(cy + math.Sin(a)*rad)}
@@ -321,6 +391,8 @@ func generate(w, h, players int, g *GenParams, theme string, age int) (string, [
 		}
 		return best
 	}
+	half := math.Min(float64(w), float64(h)) / 2
+	mcx, mcy := float64(w)/2, float64(h)/2
 	waterLvl := 1 - g.Water*0.45
 	mtnLvl := 1 - g.Mountains*0.35
 	riverA := r.Float64() * math.Pi
@@ -341,6 +413,17 @@ func generate(w, h, players int, g *GenParams, theme string, age int) (string, [
 			}
 			if m > mtnLvl && d > 10 && tt != TWater {
 				tt = TMountain
+			}
+			if mapType == MapCoastal {
+				proj := ((float64(x)-mcx)*math.Cos(oceanA)+(float64(y)-mcy)*math.Sin(oceanA))/half + (nz2.at(fx*1.5, fy*1.5)-0.5)*0.35
+				if proj > 0.5 && d > 8 {
+					tt = TWater
+				} else if proj > 0.42 && d > 6 && tt != TWater {
+					tt = TSand
+				}
+			}
+			if mapType == MapDesert && tt == TGrass && m < 0.55 {
+				tt = TSand
 			}
 			if g.River {
 				// river through the centre, perpendicular to riverA
@@ -476,7 +559,98 @@ func generate(w, h, players int, g *GenParams, theme string, age int) (string, [
 			}
 		}
 	}
+	if mapType == MapDesert && !space {
+		// a few oases with palms
+		for i := 0; i < 2+w*h/2500; i++ {
+			ox, oy := 4+r.Intn(w-8), 4+r.Intn(h-8)
+			if distStart(ox, oy) < 12 {
+				continue
+			}
+			for y := oy - 2; y <= oy+2; y++ {
+				for x := ox - 2; x <= ox+2; x++ {
+					if d := math.Hypot(float64(x-ox), float64(y-oy)); d < 1.6 && !occ[y*w+x] {
+						t[y*w+x] = TWater
+					} else if d < 2.6 && !occ[y*w+x] {
+						t[y*w+x] = TGrass
+					}
+				}
+			}
+			cluster("tree", ox+2, oy+2, 3)
+		}
+	}
+	if NavalMap(mapType, theme) {
+		objs = append(objs, placeFish(t, w, h, starts, occ, r)...)
+	}
 	return string(mapBytesToChars(t)), objs, starts
+}
+
+// placeFish scatters schools of fish in shallow water near shores and makes
+// sure every start has fish within reach of a dock.
+func placeFish(t []byte, w, h int, starts []Point, occ []bool, r *rand.Rand) []Object {
+	shore := shoreDistance(t, w, h)
+	var out []Object
+	add := func(x, y int) {
+		if x < 1 || y < 1 || x >= w-1 || y >= h-1 || occ[y*w+x] || t[y*w+x] != TWater {
+			return
+		}
+		occ[y*w+x] = true
+		out = append(out, Object{"fish", x, y})
+	}
+	for y := 1; y < h-1; y++ {
+		for x := 1; x < w-1; x++ {
+			if d := shore[y*w+x]; d >= 2 && d <= 4 && r.Float64() < 0.025 {
+				add(x, y)
+			}
+		}
+	}
+	for _, s := range starts {
+		best, bd := -1, 1e9
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				if t[y*w+x] == TWater && shore[y*w+x] >= 2 {
+					if d := math.Hypot(float64(x-s.X), float64(y-s.Y)); d < bd {
+						bd, best = d, y*w+x
+					}
+				}
+			}
+		}
+		if best >= 0 && bd < 22 {
+			bx, by := best%w, best/w
+			for i := 0; i < 8; i++ {
+				add(bx+r.Intn(5)-2, by+r.Intn(5)-2)
+			}
+		}
+	}
+	return out
+}
+
+// shoreDistance returns, for every tile, the 4-neighbour distance to land.
+func shoreDistance(t []byte, w, h int) []int {
+	d := make([]int, w*h)
+	var q []int
+	for i, v := range t {
+		if v != TWater {
+			q = append(q, i)
+		} else {
+			d[i] = 1 << 20
+		}
+	}
+	for k := 0; k < len(q); k++ {
+		i := q[k]
+		x, y := i%w, i/w
+		for _, n := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+			nx, ny := x+n[0], y+n[1]
+			if nx < 0 || ny < 0 || nx >= w || ny >= h {
+				continue
+			}
+			j := ny*w + nx
+			if d[j] > d[i]+1 {
+				d[j] = d[i] + 1
+				q = append(q, j)
+			}
+		}
+	}
+	return d
 }
 
 func mapBytesToChars(t []byte) []byte {

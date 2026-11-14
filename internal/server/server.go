@@ -406,10 +406,11 @@ type levelInfo struct {
 	Campaign    int            `json:"campaign,omitempty"`
 	Opponents   int            `json:"opponents"`
 	Difficulty  string         `json:"difficulty"`
+	MapType     string         `json:"mapType"`
 }
 
 func infoOf(l *game.Level) levelInfo {
-	return levelInfo{l.ID, l.Name, l.Description, l.Author, l.Theme, l.Width, l.Height, l.StartAge, l.MaxAge, l.MaxPlayers, l.Objective, levels.Index(l.ID), l.Opponents, l.Difficulty}
+	return levelInfo{l.ID, l.Name, l.Description, l.Author, l.Theme, l.Width, l.Height, l.StartAge, l.MaxAge, l.MaxPlayers, l.Objective, levels.Index(l.ID), l.Opponents, l.Difficulty, l.MapType}
 }
 
 func (s *Server) handleLevels(w http.ResponseWriter, r *http.Request) {
