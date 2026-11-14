@@ -49,6 +49,10 @@ function gun(sprite) { return ['musket', 'bayonet', 'rifle', 'smg', 'mg', 'grena
 // (arm 0 = hanging down, + = back/up; weapon 0 = upright, + = forward)
 const POSE_M = [[0, -0.5, 0.3], [0.45, 2.5, -1.0], [0.6, -1.3, 1.9], [1, -0.5, 0.3]];
 const POSE_W = [[0, -0.6, 0.2], [0.45, 2.1, -0.7], [0.6, -1.0, 1.7], [1, -0.6, 0.2]];
+// harvesting food: low sweeping sickle cut / picking
+const POSE_H = [[0, -0.1, 0.9], [0.5, 1.0, -0.1], [0.68, 0.0, 1.2], [1, -0.1, 0.9]];
+// mining: high overhead pick swing
+const POSE_X = [[0, -0.7, 0.3], [0.45, 2.6, -1.0], [0.58, -1.25, 1.95], [1, -0.7, 0.3]];
 function pose(a, K) {
   for (let i = 1; i < K.length; i++) if (a <= K[i][0]) {
     let k = (a - K[i - 1][0]) / (K[i][0] - K[i - 1][0]);
@@ -271,7 +275,7 @@ export function drawHuman(ctx, x, y, o) {
   const skin = SKIN[id % SKIN.length];
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const bodyY = -15 - bob;
-  const lean = melee(sprite) && busy ? Math.sin(Math.min(1, act / 0.6) * Math.PI) * 0.8 : (worker && busy ? 0.6 : 0);
+  const lean = melee(sprite) && busy ? Math.sin(Math.min(1, act / 0.6) * Math.PI) * 0.8 : (worker && busy ? (o.res === 0 && o.state !== 5 ? 1.3 : 0.6) : 0);
   // ---- legs (far leg first)
   if (o.legs !== false) {
     const legs = [[-1.1, -step], [1.1, step]];
@@ -313,7 +317,11 @@ export function drawHuman(ctx, x, y, o) {
   let recoil = 0;
   if (cls === 'crew') { backHand = [-1.6, sY + 4]; frontHand = [3.6, sY + 3.4 + Math.sin(act * TAU) * 1.2]; }
   else if (worker) {
-    if (busy) { [frontR, frontAng] = pose(act, POSE_W); backHand = [1.6, sY + 4.5]; }
+    if (busy) {
+      const r = o.res, build = o.state === 5;
+      [frontR, frontAng] = pose(act, build ? POSE_W : r === 0 ? POSE_H : r === 2 || r === 3 || r === 4 ? POSE_X : POSE_W);
+      backHand = !build && r === 0 ? [3.2, sY + 7] : [1.6, sY + 4.5];
+    }
     else { frontR = -0.5 - step * 0.2; frontAng = 0.2; }
   } else if (melee(sprite)) { if (busy) [frontR, frontAng] = pose(act, POSE_M); else { frontR = -0.5 - step * 0.3; frontAng = 0.3; } }
   else if (polearm(sprite)) {

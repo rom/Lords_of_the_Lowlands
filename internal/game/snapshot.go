@@ -19,10 +19,11 @@ type EntView struct {
 	State int         `json:"s,omitempty"` // order
 	Busy  bool        `json:"b,omitempty"`
 	Face  float64     `json:"f,omitempty"`
-	Prog  float64     `json:"p,omitempty"` // construction progress
-	Carry int         `json:"c,omitempty"` // carried amount
-	CRes  int         `json:"r,omitempty"` // carried resource
-	Amt   int         `json:"a,omitempty"` // resource amount / farm food
+	Prog  float64     `json:"p,omitempty"`  // construction progress
+	Carry int         `json:"c,omitempty"`  // carried amount
+	CRes  int         `json:"r,omitempty"`  // carried resource (absent = 0, food)
+	Work  int         `json:"wr,omitempty"` // resource of the gather target + 1 (0 = none)
+	Amt   int         `json:"a,omitempty"`  // resource amount / farm food
 	Age   int         `json:"g,omitempty"`
 	Queue []QItem     `json:"q,omitempty"`
 	Rally *[2]float64 `json:"rl,omitempty"`
@@ -118,6 +119,9 @@ func (g *Game) SnapshotDelta(player int, events []Event, withFog, key bool) *Sna
 			if own {
 				v.Carry, v.CRes = int(e.Carry), e.CarryRes
 				v.MaxHP = int(e.MaxHP)
+				if e.Order == OGather {
+					v.Work = targetRes(g.Ents[e.Target]) + 1
+				}
 			}
 		case KBuilding:
 			if !e.Built {

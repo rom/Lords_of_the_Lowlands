@@ -250,3 +250,33 @@ kbd { display: inline-block; margin: 0 3px 2px 0; padding: 1px 6px; border: 1px 
 .tt-prog div { height: 100%; background: #6fb8f0; border-radius: 2px; }
 .tt-cell canvas { max-width: 100%; height: auto; }
 .tt-stack .tt-cell canvas { width: 32px; height: 32px; }
+
+/* user manual & FAQ window (F4, main menu) */
+.manual-box { width: min(1180px, 100%); height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+.manual-box .help-head { flex-wrap: wrap; }
+.mtabs { display: flex; gap: 6px; }
+.mtab.active { background: var(--gold); color: #1b140c; border-color: var(--gold); }
+.msearch { flex: 1; min-width: 160px; max-width: 360px; }
+.minfo { color: var(--ink-dim); font-size: 13px; min-width: 90px; }
+.mwrap { flex: 1; display: grid; grid-template-columns: 250px 1fr; gap: 16px; min-height: 0; }
+.mtoc { overflow: auto; border-right: 1px solid var(--gold-dim); padding-right: 10px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.mtoc a { color: var(--ink-dim); text-decoration: none; padding: 3px 6px; border-radius: 4px; }
+.mtoc a:hover { background: rgba(217,180,90,0.15); color: var(--ink); }
+.mtoc a.mtoc-1 { color: var(--gold); font-weight: bold; margin-top: 6px; }
+.mtoc a.mtoc-3 { padding-left: 18px; font-size: 12px; }
+.mbody { overflow: auto; padding-right: 12px; line-height: 1.55; color: var(--ink); font-size: 15px; }
+.mbody h2, .mbody h3, .mbody h4, .mbody h5 { color: var(--gold); line-height: 1.25; scroll-margin-top: 8px; }
+.mbody h2 { font-size: 26px; margin: 4px 0 10px; }
+.mbody h3 { font-size: 20px; margin: 22px 0 8px; border-bottom: 1px solid var(--gold-dim); padding-bottom: 4px; }
+.mbody h4 { font-size: 16px; margin: 16px 0 6px; }
+.mbody p, .mbody li { color: var(--ink); }
+.mbody code { background: rgba(255,255,255,0.08); border: 1px solid rgba(217,180,90,0.25); border-radius: 3px; padding: 0 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+.mbody pre { background: rgba(0,0,0,0.35); padding: 10px; border-radius: 6px; overflow: auto; }
+.mbody blockquote { margin: 10px 0; padding: 6px 14px; border-left: 3px solid var(--gold); background: rgba(217,180,90,0.08); }
+.mbody .mtable { overflow-x: auto; margin: 10px 0; }
+.mbody table { border-collapse: collapse; font-size: 14px; }
+.mbody th, .mbody td { border: 1px solid rgba(217,180,90,0.25); padding: 4px 8px; text-align: left; vertical-align: top; }
+.mbody th { background: rgba(217,180,90,0.14); color: var(--gold); }
+.mbody a.mlink { color: #f0c96a; }
+@media (max-width: 720px) { .mwrap { grid-template-columns: 1fr; } .mtoc { display: none; } }
+.mbody pre code { border: none; background: none; padding: 0; }

@@ -3,6 +3,7 @@ import { el, $, clamp, lerp, fmtTime, TEAM, TEAM_NAMES, iso } from './util.js';
 import { Renderer } from './render.js';
 import { iconCanvas, techIcon, cmdIcon, resIcon, romanNum, RES_COLORS } from './sprites.js';
 import { sfx, playMusic, audioSettings, saveAudio } from './audio.js';
+import { manualBox } from './manual.js';
 
 // kindIcon is techIcon plus icons for the map-specific technology kinds
 // (farming, fishing, navy, mining) that techIcon draws as a blank tile.
@@ -63,6 +64,7 @@ export const SHORTCUTS = [
     ['? / F1', 'Show or hide this help'],
     ['F10', 'Game menu'],
     ['F2  or  Y', 'Your tech tree (click a technology to research it)'],
+    ['F4', 'User manual and FAQ'],
     ['Esc', 'Cancel placement / back / close window / clear selection'],
     ['Enter', 'Open chat (Tab switches All / Team / Global)'],
     ['Ctrl+S', 'Quick save (registered players)'],
@@ -180,6 +182,8 @@ export class GameClient {
         if (!('p' in v)) e.p = 0;
         if (!('b' in v)) e.b = false;
         if (!('c' in v)) e.c = 0;
+        if (!('r' in v)) e.r = 0; // food is resource 0 and is omitted: never keep a stale load
+        if (!('wr' in v)) e.wr = 0;
         if (!('rl' in v)) e.rl = undefined;
         e.def = this.defOf(v);
       }
@@ -593,6 +597,7 @@ export class GameClient {
       this.canSave() ? el('button', { class: 'btn', text: 'Save Game', onclick: () => this.saveDialog() }) : null,
       this.spectator ? null : el('button', { class: 'btn', text: 'Tech Tree (F2)', onclick: () => this.techTree() }),
       el('button', { class: 'btn', text: 'Keyboard Shortcuts (?)', onclick: () => this.helpOverlay() }),
+      el('button', { class: 'btn', text: 'Manual & FAQ (F4)', onclick: () => this.manual() }),
       el('button', { class: 'btn', text: 'Settings', onclick: () => this.app.showSettings() }),
       this.spectator ? null : el('button', { class: 'btn danger', text: 'Resign', onclick: () => this.ask('Resign?', 'You will lose this game.', 'Resign', () => this.send({ c: 'resign' }), { danger: true }) }),
       el('button', { class: 'btn', text: 'Leave to Menu', onclick: () => this.app.leaveGame() }));
@@ -762,6 +767,13 @@ export class GameClient {
     }
   }
 
+  // manual opens the user manual / FAQ window (F4); Esc or F4 closes it.
+  manual(tab = 'manual') {
+    if (this.over) return;
+    if (this.modal === 'manual') { this.closeOverlay(); return; }
+    this.openOverlay(manualBox(tab, () => this.closeOverlay()), 'manual');
+  }
+
   helpOverlay() {
     if (this.over) return;
     if (this.modal === 'help') { this.closeOverlay(); return; }
@@ -771,7 +783,10 @@ export class GameClient {
     const box = el('div', { class: 'panel help-box' },
       el('div', { class: 'help-head' }, el('h2', { text: 'Keyboard Shortcuts' }), el('button', { class: 'btn small', text: 'Close (Esc)', onclick: () => this.closeOverlay() })),
       el('div', { class: 'help-grid' }, ...cols),
-      el('p', { class: 'keys', text: 'Tip: every command button shows its hotkey in the corner; hover a button for details.' }));
+      el('p', { class: 'keys', text: 'Tip: every command button shows its hotkey in the corner; hover a button for details.' }),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn small', text: 'User Manual (F4)', onclick: () => this.manual('manual') }),
+        el('button', { class: 'btn small', text: 'FAQ', onclick: () => this.manual('faq') })));
     this.openOverlay(box, 'help');
   }
 
@@ -924,9 +939,10 @@ export class GameClient {
     const ctrl = e.ctrlKey || e.metaKey;
     if (k === '?' || k === 'f1' || (k === '/' && e.shiftKey)) { e.preventDefault(); this.helpOverlay(); return; }
     if (k === 'f2' || (k === 'y' && !e.shiftKey && !ctrl)) { e.preventDefault(); this.techTree(); return; }
+    if (k === 'f4') { e.preventDefault(); this.manual(); return; }
     // while a window is open only its own keys work
     if (this.overlayOpen()) {
-      if (k === 'escape' || (k === 'f10' && this.modal === 'menu')) { e.preventDefault(); this.closeOverlay(); }
+      if (k === 'escape' || (k === 'f10' && this.modal === 'menu') || (k === 'f4' && this.modal === 'manual')) { e.preventDefault(); this.closeOverlay(); }
       else if (k === 'enter' && this.modal === 'dialog' && this.modalOk) { e.preventDefault(); this.modalOk(); }
       return;
     }

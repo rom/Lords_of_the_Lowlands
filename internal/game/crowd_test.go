@@ -95,3 +95,51 @@ func TestCrowdedWorkersKeepWorking(t *testing.T) {
 		}
 	}
 }
+
+// A worker carrying wood that is sent to berries delivers the wood first
+// (nothing is lost) and then carries food; the snapshot reports what it
+// carries and what it is working on.
+func TestSwitchResourceDeliversLoadFirst(t *testing.T) {
+	g := newGame(t, flatLevel(Object{"tree", 14, 8}, Object{"berry", 9, 14}), false)
+	g.placeBuilding("lumber_camp", 0, 11, 8, true)
+	g.placeBuilding("granary", 0, 10, 11, true)
+	var tree, bush *Entity
+	for _, e := range g.Ents {
+		switch e.Type {
+		case "tree":
+			tree = e
+		case "berry":
+			bush = e
+		}
+	}
+	w := g.spawnUnit("worker_0", 0, 13.5, 9.5)
+	g.orderGather(w, tree)
+	for i := 0; i < 600 && w.Carry < 6; i++ {
+		g.Step()
+	}
+	if w.CarryRes != Wood || w.Carry < 6 {
+		t.Fatalf("setup: carrying %.1f of %d", w.Carry, w.CarryRes)
+	}
+	wood := g.Players[0].Res[Wood]
+	load := w.Carry
+	g.orderGather(w, bush)
+	sawFood := false
+	for i := 0; i < 900; i++ {
+		g.Step()
+		if w.CarryRes == Food && w.Carry > 0 {
+			sawFood = true
+			break
+		}
+	}
+	if !sawFood {
+		t.Fatalf("never started carrying food: carry %.1f of %d", w.Carry, w.CarryRes)
+	}
+	if got := g.Players[0].Res[Wood] - wood; got < load-0.01 {
+		t.Fatalf("wood load was lost: delivered %.1f of %.1f", got, load)
+	}
+	for _, v := range g.Snapshot(0, nil, false).Ents {
+		if v.ID == w.ID && (v.CRes != Food || v.Work != Food+1) {
+			t.Fatalf("snapshot: carrying %d, working %d", v.CRes, v.Work)
+		}
+	}
+}

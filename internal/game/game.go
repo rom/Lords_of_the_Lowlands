@@ -1351,8 +1351,32 @@ func carryCap(u *Entity) float64 {
 	return 10 + float64(u.Age)
 }
 
+// targetRes is the resource a gather target yields (-1 if none).
+func targetRes(t *Entity) int {
+	switch {
+	case t == nil || t.dead:
+		return -1
+	case t.Kind == KResource:
+		return t.R.Res
+	case t.Kind == KBuilding && t.Type == "farm", t.Kind == KUnit: // farm, hunted animal
+		return Food
+	}
+	return -1
+}
+
 func (g *Game) gatherStep(u *Entity) {
 	t := g.Ents[u.Target]
+	// Switched to another resource while carrying something else (e.g. sent
+	// from the forest to the berries with wood in hand): deliver the old load
+	// first, or drop it if there is nowhere to deliver it.
+	if r := targetRes(t); u.Carry > 0 && r >= 0 && r != u.CarryRes {
+		if g.nearestDropoff(u, u.CarryRes) != nil {
+			g.returnStep(u)
+			return
+		}
+		u.Carry = 0
+		u.CarryRes = r
+	}
 	if u.Carry >= carryCap(u) || (u.Carry > 0 && (t == nil || t.dead)) {
 		g.returnStep(u)
 		return

@@ -486,6 +486,19 @@ export class Renderer {
       drawables.push({ d, e });
     }
     drawables.sort((a, b) => a.d - b.d);
+    // gather targets in view (resources, farms, wild animals), bucketed by
+    // tile: fallback for a gathering worker's tool when the snapshot has no
+    // work resource (e.wr) for it (e.g. units of other players)
+    this.gatherGrid = null;
+    for (const it of drawables) { const e = it.e; if (e && e.k === 0 && e.s === 4 && !e.wr && e.def && e.def.class === 'worker') { this.gatherGrid = new Map(); break; } }
+    if (this.gatherGrid) for (const it of drawables) {
+      const e = it.e;
+      if (!e) continue;
+      const tgt = e.k === 2 || (e.k === 1 && e.t === 'farm') || (e.k === 0 && e.o < 0 && e.def && e.def.class === 'animal');
+      if (!tgt) continue;
+      const key = (Math.floor(e.x) & 0xffff) | (Math.floor(e.y) << 16);
+      const b = this.gatherGrid.get(key); if (b) b.push(e); else this.gatherGrid.set(key, [e]);
+    }
     // selection rings (under everything)
     for (const it of drawables) {
       const e = it.e;
@@ -583,7 +596,11 @@ export class Renderer {
         const walking = e.moving;
         const walk = walking ? (t * (def.speed || 1) * 1.6 + e.i * 0.37) % 1 : 0;
         const act = e.b ? (t * 1.6 + e.i * 0.21) % 1 : 0;
-        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry: e.c > 0 ? e.r : -1, id: e.i, t, moving: !!walking, res: e.r, state: e.s, lod });
+        // the load on the back follows the CARRIED resource (e.c amount, e.r
+        // type); the tool follows the gather target (e.wr = its resource + 1)
+        const carry = e.c > 0 ? (e.r || 0) : -1;
+        const res = def.class !== 'worker' ? undefined : e.wr ? e.wr - 1 : this.workRes(e, carry);
+        drawUnit(ctx, sx, sy, { def, team: e.o, era: def.era, face: e.f, walk, act, busy: e.b, carry, id: e.i, t, moving: !!walking, res, state: e.s, lod });
         if (walking && !def.flying && !def.naval && def.class !== 'naval' && (def.class === 'mounted' || def.class === 'siege' || def.pop > 1 || def.class === 'animal') && Math.random() < dt * 7 && this.themeName !== 'space') this.puff(e.x - Math.cos(e.f || 0) * 0.25, e.y - Math.sin(e.f || 0) * 0.25, 0.12, 'kick');
       }
     }
@@ -770,6 +787,30 @@ export class Renderer {
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1) + 0.5, Math.min(b.y0, b.y1) + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
+  }
+
+  // resource index (0 food .. 4 energy) a gathering worker is working on,
+  // guessed from the nearest gather target in reach; falls back to the load
+  workRes(e, carry) {
+    const fb = carry >= 0 ? carry : -1;
+    if (e.s !== 4 || !this.gatherGrid) return fb;
+    let best = null, bd = 2.6;
+    const tx = Math.floor(e.x), ty = Math.floor(e.y);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const b = this.gatherGrid.get(((tx + dx) & 0xffff) | ((ty + dy) << 16));
+      if (!b) continue;
+      for (const r of b) {
+        let d;
+        if (r.k === 1) { const h = (r.def ? r.def.size : 2) / 2; d = Math.max(0, Math.abs(e.x - r.x) - h) + Math.max(0, Math.abs(e.y - r.y) - h); }
+        else d = Math.hypot(e.x - r.x, e.y - r.y);
+        if (d < bd) { bd = d; best = r; }
+      }
+    }
+    if (!best) return fb;
+    if (best.k !== 2) return 0; // farm or hunted animal
+    const rd = this.defs && this.defs.resources ? this.defs.resources[best.t] : null;
+    if (rd && rd.res != null) return rd.res;
+    return { tree: 1, berry: 0, carcass: 0, fish: 0, stone: 2, gold: 3, crystal: 4 }[best.t] ?? fb;
   }
 
   // scorch marks / craters (flat) and building rubble, fading out
