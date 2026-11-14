@@ -80,8 +80,8 @@ effect and piece of music is generated procedurally at runtime.
 | *Multiplayer lobby with global chat* | *A battle room: humans and AI, teams and seats* |
 | ![Administration](docs/screenshots/admin.png) | ![Health & performance](docs/screenshots/admin-stats.png) |
 | *Administration: approve, block, roles, MFA, passwords* | *Live health and performance dashboard* |
-| ![Demo mode](docs/screenshots/demo.png) | |
-| *Demo mode: the game plays itself when nobody is at the keyboard* | |
+| ![Demo mode](docs/screenshots/demo.png) | ![Coastal map](docs/screenshots/naval.png) |
+| *Demo mode: the game plays itself when nobody is at the keyboard* | *Coastal map: harbour, fishing boat and fish schools* |
 
 ## Quick start
 
@@ -182,7 +182,7 @@ make race          # race detector on the server
 make long          # hour-long AI-vs-AI matches across ages
 ```
 
-Current coverage: **92.4 %** of statements across all packages (`make cover`).
+Current coverage: **92.3 %** of statements across all packages (`make cover`).
 
 Fuzz targets: `FuzzParseClientMsg`, `FuzzHTTPAPI` (server), `FuzzLevelJSON`, `FuzzApply`, `FuzzFog`,
 `FuzzCleanText`, `FuzzLoadGame` (game), `FuzzOpenCorruptFiles`, `FuzzValidName` (store).
