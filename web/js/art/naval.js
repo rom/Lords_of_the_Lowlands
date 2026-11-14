@@ -112,39 +112,41 @@ function line(ctx, a, b, col, w) { ctx.strokeStyle = col; ctx.lineWidth = w; ctx
 
 // square sail across the ship at position a; w half-width, z1..z2
 function squareSail(ctx, m, a, w, z1, z2, col, team, opt = {}) {
-  const billow = opt.billow ?? 0.12;
-  const A = m.Q(a, -w, z2), B = m.Q(a, w, z2), C = m.Q(a + billow * 0.5, w * 0.95, z1), D = m.Q(a + billow * 0.5, -w * 0.95, z1);
-  const Mb = m.Q(a + billow, 0, z1 - 0.03), Mt = m.Q(a + billow * 0.4, 0, z2 + 0.02), Ml = m.Q(a + billow, -w, (z1 + z2) / 2), Mr = m.Q(a + billow, w, (z1 + z2) / 2);
-  // is the sail's front visible (bow facing camera)?
-  const front = m.c + m.s > 0;
-  const lc = front ? 1.0 : 0.78;
+  // yards are braced at an angle so the sail reads from every heading
+  const br = opt.brace ?? 0.5, sb = Math.sin(br), cb = Math.cos(br);
+  const bil = (opt.billow ?? 0.12) + 0.06;
+  const S = (u, z, k = 0) => m.Q(a + u * sb + k * cb, u * cb - k * sb, z);
+  const A = S(-w, z2), B = S(w, z2), C = S(w * 0.95, z1, bil * 0.4), D = S(-w * 0.95, z1, bil * 0.4);
+  const Mb = S(0, z1 - 0.03, bil), Mt = S(0, z2 + 0.02, bil * 0.4), Ml = S(-w, (z1 + z2) / 2, bil * 0.8), Mr = S(w, (z1 + z2) / 2, bil * 0.8);
+  // which side of the sail faces the camera
+  const nx = cb, ny = -sb; const r = m.R(nx, ny);
+  const front = r[0] + r[1] > 0;
+  const lc = front ? 1.0 : 0.8;
   const path = () => { ctx.beginPath(); ctx.moveTo(...A); ctx.quadraticCurveTo(...Mt, ...B); ctx.quadraticCurveTo(...Mr, ...C); ctx.quadraticCurveTo(...Mb, ...D); ctx.quadraticCurveTo(...Ml, ...A); ctx.closePath(); };
   path();
   const g = ctx.createLinearGradient(A[0], A[1], C[0], C[1]);
-  g.addColorStop(0, shade(col, 1.05 * lc)); g.addColorStop(0.5, shade(col, 0.88 * lc)); g.addColorStop(1, shade(col, 0.98 * lc));
+  g.addColorStop(0, shade(col, 1.05 * lc)); g.addColorStop(0.5, shade(col, 0.86 * lc)); g.addColorStop(1, shade(col, 0.98 * lc));
   ctx.fillStyle = g; ctx.fill();
   ctx.save(); path(); ctx.clip();
-  if (opt.stripes) { // vertical team stripes (longship)
-    ctx.fillStyle = TEAM[team] || '#888';
-    for (let k = -2; k <= 2; k += 2) { const u0 = k / 5 * w, u1 = (k + 1) / 5 * w; const p = [m.Q(a + billow, u0, z1 - 0.1), m.Q(a + billow, u1, z1 - 0.1), m.Q(a, u1, z2 + 0.1), m.Q(a, u0, z2 + 0.1)]; ctx.beginPath(); p.forEach((q, i) => i ? ctx.lineTo(...q) : ctx.moveTo(...q)); ctx.fill(); }
+  const tc = TEAM[team] || '#888';
+  if (opt.stripes) {
+    ctx.fillStyle = tc;
+    for (let k = -2; k <= 2; k += 2) { const u0 = k / 5 * w, u1 = (k + 1) / 5 * w; const p = [S(u0, z1 - 0.1, bil), S(u1, z1 - 0.1, bil), S(u1, z2 + 0.1, 0), S(u0, z2 + 0.1, 0)]; ctx.beginPath(); p.forEach((q, i) => i ? ctx.lineTo(...q) : ctx.moveTo(...q)); ctx.fill(); }
   } else if (opt.cross) {
-    ctx.strokeStyle = TEAM[team] || '#888'; ctx.lineWidth = 3;
-    const cm = m.Q(a + billow * 0.8, 0, (z1 + z2) / 2);
-    ctx.beginPath(); ctx.moveTo(...m.Q(a + billow * 0.5, 0, z2)); ctx.quadraticCurveTo(cm[0], cm[1], ...m.Q(a + billow * 0.6, 0, z1)); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(...m.Q(a + billow, -w, (z1 + z2) / 2)); ctx.lineTo(...m.Q(a + billow, w, (z1 + z2) / 2)); ctx.stroke();
+    ctx.strokeStyle = tc; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(...S(0, z2, bil * 0.4)); ctx.quadraticCurveTo(...S(0, (z1 + z2) / 2, bil * 1.2), ...S(0, z1, bil * 0.6)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(...S(-w, (z1 + z2) / 2, bil * 0.8)); ctx.quadraticCurveTo(...S(0, (z1 + z2) / 2, bil * 1.2), ...S(w, (z1 + z2) / 2, bil * 0.8)); ctx.stroke();
   } else if (team != null && opt.band !== false) {
-    const z = z1 + (z2 - z1) * 0.38, h = (z2 - z1) * 0.2;
-    ctx.fillStyle = TEAM[team] || '#888';
-    const p = [m.Q(a + billow, -w, z), m.Q(a + billow, w, z), m.Q(a + billow, w, z + h), m.Q(a + billow, -w, z + h)];
-    ctx.beginPath(); p.forEach((q, i) => i ? ctx.lineTo(...q) : ctx.moveTo(...q)); ctx.fill();
+    const z = z1 + (z2 - z1) * 0.38, h = (z2 - z1) * 0.22;
+    ctx.fillStyle = tc;
+    ctx.beginPath(); ctx.moveTo(...S(-w * 1.1, z, bil)); ctx.quadraticCurveTo(...S(0, z, bil * 1.6), ...S(w * 1.1, z, bil)); ctx.lineTo(...S(w * 1.1, z + h, bil)); ctx.quadraticCurveTo(...S(0, z + h, bil * 1.6), ...S(-w * 1.1, z + h, bil)); ctx.closePath(); ctx.fill();
   }
   ctx.strokeStyle = 'rgba(60,40,20,0.25)'; ctx.lineWidth = 0.5; ctx.beginPath();
-  for (let k = 1; k < 4; k++) { const z = z1 + (z2 - z1) * k / 4; ctx.moveTo(...m.Q(a + billow * 0.6, -w, z)); ctx.quadraticCurveTo(...m.Q(a + billow * 1.2, 0, z), ...m.Q(a + billow * 0.6, w, z)); }
+  for (let k = 1; k < 4; k++) { const z = z1 + (z2 - z1) * k / 4; ctx.moveTo(...S(-w, z, bil * 0.6)); ctx.quadraticCurveTo(...S(0, z, bil * 1.4), ...S(w, z, bil * 0.6)); }
   ctx.stroke();
   ctx.restore();
   path(); ctx.strokeStyle = 'rgba(70,55,35,0.6)'; ctx.lineWidth = 0.6; ctx.stroke();
-  // yard
-  line(ctx, m.Q(a, -w * 1.1, z2), m.Q(a, w * 1.1, z2), '#4a3018', 1.3);
+  line(ctx, S(-w * 1.1, z2), S(w * 1.1, z2), '#4a3018', 1.3);
 }
 function mast(ctx, m, a, z0, z1, col = '#5a3a1a', w = 1.6) { const p = m.Q(a, 0, z0), q = m.Q(a, 0, z1); line(ctx, p, q, col, w); return q; }
 function pennant(ctx, p, team, t, len = 8) {
@@ -165,18 +167,20 @@ function waterFx(ctx, m, L, B, o, moving, glow) {
   ctx.restore();
   const t = o.t || 0;
   if (moving) {
-    // V-wake trailing from the stern
-    for (let k = 0; k < 5; k++) {
-      const f = ((t * 1.4 + k / 5) % 1);
-      const back = -L - f * L * 2.2, spread = B * (1 + f * 3.2);
-      const al = 0.45 * (1 - f);
-      ctx.strokeStyle = `rgba(235,248,255,${al})`; ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.moveTo(...m.Q(back, -spread, 0)); ctx.quadraticCurveTo(...m.Q(back + 0.08, 0, 0), ...m.Q(back, spread, 0)); ctx.stroke();
+    // V-wake: fading foam trails from the bow shoulders and churn at the stern
+    for (const sg of [-1, 1]) for (let k = 0; k < 9; k++) {
+      const f0 = k / 9, f1 = (k + 1) / 9;
+      const p0 = m.Q(L * 0.6 - f0 * L * 3, sg * B * (1 + f0 * 2.6), 0), p1 = m.Q(L * 0.6 - f1 * L * 3, sg * B * (1 + f1 * 2.6), 0);
+      ctx.strokeStyle = `rgba(235,248,255,${0.55 * (1 - f0)})`; ctx.lineWidth = 1.4 * (1 - f0 * 0.5);
+      ctx.beginPath(); ctx.moveTo(...p0); ctx.lineTo(...p1); ctx.stroke();
     }
-    ctx.strokeStyle = 'rgba(240,250,255,0.55)'; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(...m.Q(L * 0.95, 0, 0)); ctx.lineTo(...m.Q(-L * 2.2, -B * 2.6, 0)); ctx.moveTo(...m.Q(L * 0.95, 0, 0)); ctx.lineTo(...m.Q(-L * 2.2, B * 2.6, 0)); ctx.globalAlpha = 0.5; ctx.stroke(); ctx.globalAlpha = 1;
-    // churn at the stern and bow spray
-    for (let k = 0; k < 6; k++) { const q = m.Q(-L - 0.05 - hash2(k, 1, o.id || 0) * 0.25, (hash2(k, 2, o.id || 0) - 0.5) * B * 1.6, 0); ctx.fillStyle = `rgba(255,255,255,${0.25 + 0.25 * Math.sin(t * 9 + k)})`; ctx.beginPath(); ctx.arc(q[0], q[1], 1.6, 0, 7); ctx.fill(); }
+    for (let k = 0; k < 3; k++) {
+      const f = ((t * 1.2 + k / 3) % 1);
+      const back = -L - f * L * 1.6, spread = B * (0.6 + f * 1.6);
+      ctx.strokeStyle = `rgba(235,248,255,${0.4 * (1 - f)})`; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(...m.Q(back, -spread, 0)); ctx.quadraticCurveTo(...m.Q(back - 0.06, 0, 0), ...m.Q(back, spread, 0)); ctx.stroke();
+    }
+    for (let k = 0; k < 6; k++) { const q = m.Q(-L - 0.05 - hash2(k, 1, o.id || 0) * 0.3, (hash2(k, 2, o.id || 0) - 0.5) * B * 1.6, 0); ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.25 * Math.sin(t * 9 + k)})`; ctx.beginPath(); ctx.arc(q[0], q[1], 1.5, 0, 7); ctx.fill(); }
     const bw = m.Q(L * 1.02, 0, 0); ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(bw[0], bw[1], 3, 1.6, 0, 0, 7); ctx.fill();
   } else {
     // idle ripples
@@ -400,6 +404,6 @@ function futureShip(ctx, m, team, tc, t, moving, bob, o, era) {
   { const p = [m.Q(0.25, -B * 0.4, z + 0.22), m.Q(0.4, 0, z + 0.14), m.Q(0.25, B * 0.4, z + 0.22)]; ctx.fillStyle = glow; ctx.globalAlpha = 0.85; ctx.beginPath(); p.forEach((q, i) => i ? ctx.lineTo(...q) : ctx.moveTo(...q)); ctx.fill(); ctx.globalAlpha = 1; }
   rbox(ctx, m, -0.2, 0.0, -0.05, 0.05, z + 0.22, z + 0.32, '#5a6678');
   line(ctx, m.Q(0.4, 0, z + 0.12), m.Q(0.7, 0, z + 0.14), '#3a4048', 2.2);
-  for (const sg of [-0.5, 0.5]) { const e = m.Q(-L, sg * B, z + 0.06); const g = ctx.createRadialGradient(e[0], e[1], 0, e[0], e[1], 7 + (moving ? 3 : 0)); g.addColorStop(0, '#fff'); g.addColorStop(0.35, glow); g.addColorStop(1, 'rgba(0,200,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e[0], e[1], 10, 0, 7); ctx.fill(); }
+  for (const sg of [-0.5, 0.5]) { const e = m.Q(-L, sg * B, z + 0.06); const R = moving ? 6 : 4; const g = ctx.createRadialGradient(e[0], e[1], 0, e[0], e[1], R); g.addColorStop(0, '#fff'); g.addColorStop(0.4, glow); g.addColorStop(1, 'rgba(0,200,255,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e[0], e[1], R, 0, 7); ctx.fill(); }
   void zAt; void ZH;
 }
