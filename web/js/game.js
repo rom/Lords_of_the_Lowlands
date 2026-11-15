@@ -1,7 +1,7 @@
 // In-game client: receives snapshots, interpolates, handles input and HUD.
 import { el, $, clamp, lerp, fmtTime, TEAM, TEAM_NAMES, iso } from './util.js';
 import { Renderer } from './render.js';
-import { iconCanvas, techIcon, cmdIcon, resIcon, romanNum, RES_COLORS } from './sprites.js';
+import { iconCanvas, techIcon, cmdIcon, resIcon, statIcon, romanNum, RES_COLORS } from './sprites.js';
 import { sfx, playMusic, audioSettings, saveAudio } from './audio.js';
 import { manualBox } from './manual.js';
 
@@ -46,6 +46,24 @@ function kindIcon(kind, age, size = 44) {
 function hkName(k) { return k === 'delete' ? 'Del' : k === 'escape' ? 'Esc' : k.toUpperCase(); }
 
 const RES_SHORT = ['Food', 'Wood', 'Stone', 'Gold', 'Energy'];
+// small resource icons for tooltips and the info panel (cached data URLs)
+const RES_URL = [];
+function resIconURL(i) {
+  if (!RES_URL[i]) { const c = document.createElement('canvas'); c.width = c.height = 32; const x = c.getContext('2d'); resIcon(x, i, 16, 16, 30); RES_URL[i] = c.toDataURL('image/png'); }
+  return RES_URL[i];
+}
+// HUD icon canvases: drawn once per kind/type/era/team, then copied
+const ICONS = new Map();
+function hudIcon(kind, type, def, era, team, theme, size) {
+  const key = kind + '|' + type + '|' + era + '|' + team + '|' + theme + '|' + size;
+  let m = ICONS.get(key);
+  if (!m) { m = iconCanvas(kind, type, def, era, team, theme, size); if (ICONS.size > 300) ICONS.clear(); ICONS.set(key, m); }
+  const c = document.createElement('canvas'); c.width = m.width; c.height = m.height;
+  c.getContext('2d').drawImage(m, 0, 0);
+  return c;
+}
+function chip(kind, text, title) { return el('span', { class: 'chip', title }, el('img', { src: kind.startsWith('res') ? resIconURL(+kind.slice(3)) : statIcon(kind), alt: '' }), el('span', { text })); }
+function hpClass(h) { return h > 0.5 ? '' : h > 0.25 ? ' mid' : ' low'; }
 const ECO = ['house', 'granary', 'lumber_camp', 'mining_camp', 'farm', 'dock', 'town_center', 'generator'];
 const MIL = ['barracks', 'range', 'stable', 'workshop', 'academy', 'tower'];
 // sound of gathering each resource
@@ -296,17 +314,20 @@ export class GameClient {
     bar.replaceChildren();
     this.resEls = [];
     for (let i = 0; i < 6; i++) {
-      const c = el('canvas', { width: 40, height: 40, class: 'ricon' });
-      const ctx = c.getContext('2d'); ctx.scale(2, 2); resIcon(ctx, i, 10, 10, 18);
+      const c = el('canvas', { width: 44, height: 44, class: 'ricon' });
+      const ctx = c.getContext('2d'); ctx.scale(2, 2); resIcon(ctx, i, 11, 11, 20);
       const v = el('span', { class: 'rval', text: '0' });
-      const item = el('div', { class: 'res', title: i < 5 ? RES_SHORT[i] : 'Population' }, c, v);
+      const item = el('div', { class: 'res r' + i, title: i < 5 ? RES_SHORT[i] : 'Population (units / housing)' }, c, v);
       if (i === 4) item.classList.add('energy');
       this.resEls.push({ item, v });
       bar.append(item);
     }
-    this.ageEl = el('div', { class: 'agename' });
+    this.ageNum = el('span', { class: 'agenum' });
+    this.ageTxt = el('span', { class: 'agetxt' });
+    this.ageEl = el('div', { class: 'agename' }, this.ageNum, this.ageTxt);
     this.timeEl = el('div', { class: 'clock' });
     bar.append(this.ageEl, this.timeEl);
+    this.hudAge = -1; this.scoreKey = '';
     this.scoreEl = $('#pscores');
     this.selEl = $('#selinfo');
     this.cmdEl = $('#commands');
@@ -321,17 +342,32 @@ export class GameClient {
   }
 
   updateHUD() {
-    const vals = [...this.res.map(v => v), `${this.pop || 0}/${this.cap || 0}`];
-    vals.forEach((v, i) => { this.resEls[i].v.textContent = v; });
-    this.resEls[4].item.style.display = this.age >= 10 || this.res[4] > 0 ? '' : 'none';
-    this.resEls[5].item.classList.toggle('warn', (this.cap || 0) - (this.pop || 0) <= 2);
-    const a = this.defs.ages[this.age];
-    this.ageEl.textContent = `${romanNum(this.age + 1)}. ${a.name}`;
-    this.ageEl.title = `${a.years} — ${a.desc}`;
-    if (this.snap) this.timeEl.textContent = fmtTime(this.snap.time);
+    const pop = this.pop || 0, cap = this.cap || 0;
+    const vals = [...this.res.map(v => String(v)), `${pop}/${cap}`];
+    vals.forEach((v, i) => { const r = this.resEls[i]; if (r.v.textContent !== v) r.v.textContent = v; });
+    const showE = this.age >= 10 || this.res[4] > 0;
+    if (this.showE !== showE) { this.showE = showE; this.resEls[4].item.style.display = showE ? '' : 'none'; }
+    const popEl = this.resEls[5].item;
+    popEl.classList.toggle('warn', cap - pop <= 2 && pop < cap);
+    popEl.classList.toggle('full', pop >= cap && cap > 0);
+    if (this.hudAge !== this.age) { // age badge and era theme of the HUD
+      this.hudAge = this.age;
+      const a = this.defs.ages[this.age];
+      this.ageNum.textContent = romanNum(this.age + 1);
+      this.ageTxt.textContent = a.name;
+      this.ageEl.title = `${a.years} — ${a.desc}`;
+      this.root.dataset.era = a.era;
+      this.tip.dataset.era = a.era;
+      this.r.hudEra = a.era;
+    }
+    if (this.snap) { const tt = fmtTime(this.snap.time); if (this.timeEl.textContent !== tt) this.timeEl.textContent = tt; }
     if (this.players) {
-      this.scoreEl.replaceChildren(...this.players.map(p => el('div', { class: 'srow' + (p.d ? ' dead' : '') },
-        el('span', { class: 'swatch', style: `background:${TEAM[p.c]}` }), ` ${p.n} `, el('b', { text: p.s }), ` · ${romanNum(p.g + 1)}`)));
+      const key = this.players.map(p => `${p.n}|${p.s}|${p.g}|${p.d ? 1 : 0}|${p.c}`).join(';');
+      if (key !== this.scoreKey) {
+        this.scoreKey = key;
+        this.scoreEl.replaceChildren(...this.players.map((p, i) => el('div', { class: 'srow' + (p.d ? ' dead' : '') + (i === this.you ? ' me' : ''), title: `${p.n}: ${this.defs.ages[p.g] ? this.defs.ages[p.g].name : ''}` },
+          el('span', { class: 'swatch', style: `background:${TEAM[p.c]}` }), el('span', { class: 'sname', text: p.n }), el('b', { class: 'sscore', text: p.s }), el('span', { class: 'sage', text: romanNum(p.g + 1) }))));
+      }
     }
     this.updateSelection();
   }
@@ -347,41 +383,67 @@ export class GameClient {
     else {
       const wrap = el('div', { class: 'multi' });
       for (const e of s.slice(0, 40)) {
-        const ic = iconCanvas('unit', e.t, e.def, e.def.era, e.o, this.map.theme, 30);
+        const ic = e.k === 0 ? hudIcon('unit', e.t, e.def, e.def.era, e.o, this.map.theme, 30) : hudIcon(e.k === 1 ? 'building' : 'resource', e.t, e.def, e.k === 1 ? this.defs.ages[e.g || 0].era : '', e.o, this.map.theme, 30);
         ic.className = 'mini-ic'; ic.title = e.def.name;
-        const hb = el('div', { class: 'hpbar' }, el('div', { style: `width:${Math.round(e.hp * 100)}%` }));
+        const hb = el('div', { class: 'hpbar' + hpClass(e.hp) }, el('div', { style: `width:${Math.round(e.hp * 100)}%` }));
         wrap.append(el('div', { class: 'mcell', onclick: () => { this.sel = new Set([e.i]); this.hudDirty = true; } }, ic, hb));
       }
-      this.selEl.replaceChildren(wrap);
+      const head = el('div', { class: 'mhead', text: `${s.length} selected` + (s.length > 40 ? ' (showing 40)' : '') });
+      this.selEl.replaceChildren(head, wrap);
     }
-    if (key === this.cmdKey && !this.menuDirty) return;
-    this.cmdKey = key; this.menuDirty = false;
-    this.hideTip();
-    this.cmdEl.replaceChildren(...this.commandButtons(s));
+    if (key !== this.cmdKey || this.menuDirty) {
+      this.cmdKey = key; this.menuDirty = false;
+      this.hideTip();
+      this.cmdEl.replaceChildren(...this.commandButtons(s));
+    }
+    this.queueBadges(s);
+  }
+
+  // queue count and progress on train / advance buttons of the selected building
+  queueBadges(s) {
+    const b = s.length === 1 && s[0].k === 1 && s[0].o === this.you ? s[0] : null;
+    const q = b && b.q && b.q.length ? b.q : null;
+    if (!q && !this.qShown) return;
+    this.qShown = !!q;
+    const count = {}, prog = {};
+    if (q) q.forEach((it, i) => { const k = it.u ? 'u:' + it.u : it.a ? 'a' : 't:' + it.t; count[k] = (count[k] || 0) + 1; if (i === 0) prog[k] = it.p || 0; });
+    for (const btn of this.cmdEl.children) {
+      const k = btn.dataset.q;
+      if (!k) continue;
+      const n = count[k] || 0;
+      btn.classList.toggle('queued', n > 0);
+      const qn = btn.querySelector('.qn'), bar = btn.querySelector('.qbar i');
+      if (qn) qn.textContent = n > 1 ? String(n) : n ? '1' : '';
+      if (bar) bar.style.width = (k in prog ? Math.round(prog[k] * 100) : 0) + '%';
+    }
   }
 
   infoOne(e) {
     const d = e.def;
     let kind = e.k === 0 ? 'unit' : e.k === 1 ? 'building' : 'resource';
     const era = e.k === 1 ? this.defs.ages[e.g || 0].era : d.era;
-    const ic = iconCanvas(kind, e.t, d, era, e.o, this.map.theme, 64);
+    const ic = hudIcon(kind, e.t, d, era, e.o, this.map.theme, 64);
     ic.className = 'portrait';
+    const frame = el('div', { class: 'pframe', style: `--tc:${e.o >= 0 ? TEAM[e.o] : '#b8a878'}` }, ic);
     const name = e.k === 1 ? (this.defs.buildingNames[e.t][era] || d.name) : d.name;
     const owner = e.o >= 0 ? this.pname(e.o) : e.k === 2 ? 'Resource' : 'Wild animal';
     const lines = [];
     if (e.k !== 2) {
       const max = e.m || Math.round((d.hp || 1));
-      lines.push(el('div', { class: 'hpbar big' }, el('div', { style: `width:${Math.round(e.hp * 100)}%` }), el('span', { text: `${Math.round(e.hp * max)}/${max}` })));
+      lines.push(el('div', { class: 'hpbar big' + hpClass(e.hp) }, el('div', { style: `width:${Math.round(e.hp * 100)}%` }), el('span', { text: `${Math.round(e.hp * max)} / ${max}` })));
     }
-    if (e.k === 0 && d.attack) lines.push(el('div', { class: 'stat', text: `⚔ ${d.attack}  ⛨ ${Math.round((d.armor || 0) * 100)}%  ➶ ${d.range}` }));
-    if (e.k === 0 && e.c > 0) lines.push(el('div', { class: 'stat', text: `Carrying ${e.c} ${RES_SHORT[e.r]}` }));
-    if (e.k === 2) lines.push(el('div', { class: 'stat', text: `${e.a} ${RES_SHORT[d.res]} left` }));
-    if (e.k === 1 && e.t === 'farm' && e.a) lines.push(el('div', { class: 'stat', text: `${e.a} food left` }));
-    if (e.k === 1 && e.p > 0) lines.push(el('div', { class: 'stat', text: `Under construction: ${Math.round(e.p * 100)}%` }));
+    const chips = [];
+    if (e.k === 0 && d.attack) chips.push(chip('attack', String(d.attack), 'Attack'), chip('armor', `${Math.round((d.armor || 0) * 100)}%`, 'Armour'), chip('range', String(d.range), 'Range'));
+    if (e.k === 0 && d.speed) chips.push(chip('speed', String(Math.round(d.speed * 10) / 10), 'Speed'));
+    if (e.k === 0 && e.c > 0) chips.push(chip('res' + (e.r || 0), `${e.c} ${RES_SHORT[e.r || 0]}`, 'Carrying'));
+    if (e.k === 2 && d.res != null) chips.push(chip('res' + d.res, `${e.a} left`, RES_SHORT[d.res]));
+    if (e.k === 1 && e.t === 'farm' && e.a) chips.push(chip('res0', `${e.a} left`, 'Food left'));
+    if (e.k === 1 && e.p > 0) chips.push(chip('build', `${Math.round(e.p * 100)}%`, 'Under construction'));
+    if (chips.length) lines.push(el('div', { class: 'stats' }, ...chips));
     if (e.k === 1 && e.q && e.q.length) {
       const qd = el('div', { class: 'queue' });
       e.q.forEach((q, i) => {
-        const c = q.u ? iconCanvas('unit', q.u, this.defs.units[q.u], this.defs.units[q.u].era, e.o, this.map.theme, 30) : kindIcon(q.a ? 'age' : this.defs.techs[q.t]?.kind, q.a ? this.age + 2 : 0, 30);
+        const c = q.u ? hudIcon('unit', q.u, this.defs.units[q.u], this.defs.units[q.u].era, e.o, this.map.theme, 30) : kindIcon(q.a ? 'age' : this.defs.techs[q.t]?.kind, q.a ? this.age + 2 : 0, 30);
         c.className = 'qitem'; c.title = 'Click to cancel';
         const cell = el('div', { class: 'qcell', onclick: () => { this.send({ c: 'cancel', t: e.i, i }); sfx('click'); } }, c);
         if (i === 0) cell.append(el('div', { class: 'qprog' }, el('div', { style: `width:${Math.round(q.p * 100)}%` })));
@@ -389,7 +451,8 @@ export class GameClient {
       });
       lines.push(qd);
     }
-    return el('div', { class: 'one' }, ic, el('div', { class: 'meta' }, el('div', { class: 'name', text: name }), el('div', { class: 'owner', style: e.o >= 0 ? `color:${TEAM[e.o]}` : '', text: owner }), ...lines));
+    const cls = e.k === 0 ? (d.class ? d.class[0].toUpperCase() + d.class.slice(1) : '') : e.k === 1 ? 'Building' : '';
+    return el('div', { class: 'one' }, frame, el('div', { class: 'meta' }, el('div', { class: 'name', text: name }), el('div', { class: 'owner' }, el('span', { class: 'odot', style: `background:${e.o >= 0 ? TEAM[e.o] : '#b8a878'}` }), el('span', { text: owner + (cls ? ' · ' + cls : '') })), ...lines));
   }
 
   costText(c) {
@@ -401,8 +464,9 @@ export class GameClient {
   button(icon, title, tipLines, onclick, opts = {}) {
     const b = el('button', { class: 'cmd' + (opts.disabled ? ' disabled' : '') + (opts.poor ? ' poor' : '') }, icon);
     if (opts.key) b.append(el('span', { class: 'hk', text: hkName(opts.key) }));
+    if (opts.q) { b.dataset.q = opts.q; b.append(el('span', { class: 'qn' }), el('span', { class: 'qbar' }, el('i'))); }
     b.addEventListener('click', (ev) => { ev.stopPropagation(); this.hideTip(); if (opts.disabled) { sfx('error'); return; } sfx('click'); onclick(ev); });
-    b.addEventListener('mouseenter', () => this.showTip(title, opts.key ? [...tipLines, `Hotkey: ${hkName(opts.key)}`] : tipLines, b));
+    b.addEventListener('mouseenter', () => this.showTip(title, opts.key ? [...tipLines, `Hotkey: ${hkName(opts.key)}`] : tipLines, b, opts.cost));
     b.addEventListener('mouseleave', () => this.hideTip());
     b.dataset.key = opts.key || '';
     return b;
@@ -418,9 +482,18 @@ export class GameClient {
     if (!this.tipAnchor.isConnected || !this.tipAnchor.matches(':hover') || (!inOverlay && !$('#overlay').classList.contains('hidden'))) this.hideTip();
   }
 
-  showTip(title, lines, anchor) {
+  showTip(title, lines, anchor, cost) {
     this.tipAnchor = anchor;
-    this.tip.replaceChildren(el('b', { text: title }), ...lines.filter(Boolean).map(l => el('div', { text: l })));
+    const kids = [el('b', { text: title })];
+    if (cost) { // cost row with resource icons; what you cannot afford is tinted red
+      const parts = cost.map((v, i) => v > 0 ? el('span', { class: 'tcost' + (this.res[i] < v ? ' short' : '') }, el('img', { src: resIconURL(i), alt: RES_SHORT[i] }), el('span', { text: String(v) })) : null).filter(Boolean);
+      kids.push(el('div', { class: 'tcosts' }, ...(parts.length ? parts : [el('span', { class: 'tcost', text: 'Free' })])));
+    }
+    const rest = lines.filter(l => l && !(cost && l.startsWith('Cost:')));
+    const hot = rest.length && rest[rest.length - 1].startsWith('Hotkey: ') ? rest.pop() : null;
+    kids.push(...rest.map(l => el('div', { text: l })));
+    if (hot) kids.push(el('div', { class: 'thk' }, el('span', { text: 'Hotkey ' }), el('kbd', { text: hot.slice(8) })));
+    this.tip.replaceChildren(...kids);
     this.tip.classList.remove('hidden');
     const r = anchor.getBoundingClientRect();
     this.tip.style.left = Math.max(8, Math.min(window.innerWidth - 280, r.left - 100)) + 'px';
@@ -459,7 +532,7 @@ export class GameClient {
           const locked = d.age > this.age;
           const cost = this.buildCost(id);
           const ic = iconCanvas('building', id, d, era, this.you, this.map.theme, 44);
-          out.push(this.button(ic, name, [locked ? `Requires ${this.defs.ages[d.age].name}` : `Cost: ${this.costText(cost)}`, d.desc], () => this.startPlacing(id), { key: key(), disabled: locked, poor: !this.canAfford(cost) }));
+          out.push(this.button(ic, name, [locked ? `Requires ${this.defs.ages[d.age].name}` : `Cost: ${this.costText(cost)}`, d.desc], () => this.startPlacing(id), { key: key(), disabled: locked, poor: !this.canAfford(cost), cost: locked ? null : cost }));
         }
         out.push(this.button(cmdIcon('back'), 'Back', [''], () => { this.menuPage = 'main'; this.menuDirty = true; }, { key: 'escape' }));
         return out;
@@ -484,12 +557,12 @@ export class GameClient {
       const u = this.defs.units[uid];
       const ic = iconCanvas('unit', uid, u, u.era, this.you, this.map.theme, 44);
       out.push(this.button(ic, `Train ${u.name}`, [`Cost: ${this.costText(u.cost)}`, `HP ${u.hp} · Attack ${u.attack} · Range ${u.range} · Pop ${u.pop}`, u.desc, 'Shift-click: train 5'],
-        (ev) => this.send({ c: 'train', t: b.i, w: cls, i: ev.shiftKey ? 5 : 1 }), { key: key(), poor: !this.canAfford(u.cost) }));
+        (ev) => this.send({ c: 'train', t: b.i, w: cls, i: ev.shiftKey ? 5 : 1 }), { key: key(), poor: !this.canAfford(u.cost), cost: u.cost, q: 'u:' + uid }));
     }
     if (b.t === 'town_center' && this.age < this.map.maxAge) {
       const next = this.defs.ages[this.age + 1];
       const queued = b.q && b.q.some(q => q.a);
-      out.push(this.button(techIcon('age', this.age + 2), `Advance to ${next.name}`, [`Cost: ${this.costText(next.advanceCost)}`, `${next.years} — ${next.desc}`], () => this.send({ c: 'research', t: b.i, w: 'age' }), { key: key(), disabled: queued, poor: !this.canAfford(next.advanceCost) }));
+      out.push(this.button(techIcon('age', this.age + 2), `Advance to ${next.name}`, [`Cost: ${this.costText(next.advanceCost)}`, `${next.years} — ${next.desc}`], () => this.send({ c: 'research', t: b.i, w: 'age' }), { key: key(), disabled: queued, poor: !this.canAfford(next.advanceCost), cost: next.advanceCost, q: 'a' }));
     }
     if (b.def.research) {
       const ids = Object.values(this.defs.techs).filter(t => t.age <= this.age && !this.techs.has(t.id) && !(b.q || []).some(q => q.t === t.id)
@@ -499,7 +572,7 @@ export class GameClient {
       for (const t of ids) {
         if (seenKind.has(t.kind)) continue; // show next tech of each kind
         seenKind.add(t.kind);
-        out.push(this.button(kindIcon(t.kind, t.age), t.name, [`Cost: ${this.costText(t.cost)}`, t.desc, `Requires ${this.defs.ages[t.age].name}`], () => this.send({ c: 'research', t: b.i, w: t.id }), { key: key(), poor: !this.canAfford(t.cost) }));
+        out.push(this.button(kindIcon(t.kind, t.age), t.name, [`Cost: ${this.costText(t.cost)}`, t.desc, `Requires ${this.defs.ages[t.age].name}`], () => this.send({ c: 'research', t: b.i, w: t.id }), { key: key(), poor: !this.canAfford(t.cost), cost: t.cost, q: 't:' + t.id }));
       }
     }
     out.push(this.button(cmdIcon('delete'), 'Delete Building', ['Destroys this building'], () => this.ask('Delete building?', `${b.def.name} will be destroyed. This cannot be undone.`, 'Delete', () => this.send({ c: 'delete', ids: [b.i] }), { danger: true }), { key: 'delete' }));

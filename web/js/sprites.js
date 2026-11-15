@@ -491,21 +491,91 @@ export function drawUnit(ctx, x, y, o) {
 }
 
 // ------------------------------------------------------------------ icons
+// resource / population icon in a 20x20 box centred on (x, y), drawn at
+// size s: outlined shapes with a light top-left highlight so they stay crisp
+// on any HUD background
 export function resIcon(ctx, r, x, y, s) {
   ctx.save(); ctx.translate(x, y); ctx.scale(s / 20, s / 20);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const OLC = 'rgba(16,10,6,0.9)';
+  const out = (w = 1.4) => { ctx.strokeStyle = OLC; ctx.lineWidth = w; ctx.stroke(); };
   switch (r) {
-    case 0: // food: meat + wheat
-      ctx.fillStyle = '#c0583a'; ctx.beginPath(); ctx.ellipse(-1, 1, 7, 5.5, -0.6, 0, 7); ctx.fill();
-      ctx.fillStyle = '#f0e0c0'; ctx.fillRect(3, -7, 3, 6); ctx.beginPath(); ctx.arc(4.5, -7.5, 2.4, 0, 7); ctx.fill(); break;
-    case 1: // wood: logs
-      for (let i = 0; i < 3; i++) { ctx.fillStyle = '#7b4f2a'; ctx.fillRect(-8, -6 + i * 5, 14, 4.5); ctx.fillStyle = '#d5b07a'; ctx.beginPath(); ctx.arc(6, -3.8 + i * 5, 2.3, 0, 7); ctx.fill(); } break;
-    case 2: ctx.fillStyle = '#9aa0a6'; ctx.beginPath(); ctx.moveTo(-8, 6); ctx.lineTo(-5, -4); ctx.lineTo(2, -7); ctx.lineTo(8, 0); ctx.lineTo(6, 6); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#c8ccd0'; ctx.beginPath(); ctx.moveTo(-5, -4); ctx.lineTo(2, -7); ctx.lineTo(0, -1); ctx.fill(); break;
-    case 3: ctx.fillStyle = '#d7a52a'; ctx.beginPath(); ctx.arc(-3, 2, 5.5, 0, 7); ctx.fill(); ctx.fillStyle = '#f7d24a'; ctx.beginPath(); ctx.arc(3, -1, 5.5, 0, 7); ctx.fill(); ctx.fillStyle = '#fff3b0'; ctx.beginPath(); ctx.arc(2, -3, 1.5, 0, 7); ctx.fill(); break;
-    case 4: ctx.fillStyle = '#43d2ff'; ctx.beginPath(); ctx.moveTo(2, -9); ctx.lineTo(-6, 1); ctx.lineTo(-1, 1); ctx.lineTo(-3, 9); ctx.lineTo(6, -2); ctx.lineTo(1, -2); ctx.closePath(); ctx.fill(); break;
-    case 5: // population
-      ctx.fillStyle = '#e8d8b8'; ctx.beginPath(); ctx.arc(0, -4, 3.5, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(-6, 8); ctx.quadraticCurveTo(0, -4, 6, 8); ctx.fill(); break;
+    case 0: { // food: wheat ear behind a roast drumstick
+      ctx.strokeStyle = OLC; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(-5, 8); ctx.lineTo(4, -8); ctx.stroke();
+      ctx.strokeStyle = '#d8b040'; ctx.lineWidth = 1.2; ctx.stroke();
+      for (let i = 0; i < 4; i++) { const k = 0.35 + i * 0.17, gx = -5 + 9 * k, gy = 8 - 16 * k; for (const sd of [-1, 1]) { ctx.beginPath(); ctx.ellipse(gx + sd * 1.3, gy + 0.6, 1.1, 1.9, sd * 0.6 + 0.5, 0, 7); ctx.fillStyle = '#f2cf5a'; ctx.fill(); ctx.strokeStyle = '#8a6a1a'; ctx.lineWidth = 0.5; ctx.stroke(); } }
+      ctx.beginPath(); ctx.ellipse(-1.6, 2.4, 6.2, 4.6, -0.7, 0, 7); ctx.fillStyle = '#b8502e'; ctx.fill(); out();
+      ctx.beginPath(); ctx.ellipse(-2.6, 1.2, 3.4, 1.8, -0.7, 0, 7); ctx.fillStyle = 'rgba(255,190,140,0.55)'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(1.6, -0.4); ctx.lineTo(5.4, -4.2); ctx.strokeStyle = OLC; ctx.lineWidth = 3.4; ctx.stroke(); ctx.strokeStyle = '#f4ecd8'; ctx.lineWidth = 2; ctx.stroke();
+      for (const [bx, by] of [[5.2, -5.6], [6.8, -4]]) { ctx.beginPath(); ctx.arc(bx, by, 1.5, 0, 7); ctx.fillStyle = '#f4ecd8'; ctx.fill(); out(0.9); }
+      break;
+    }
+    case 1: // wood: three stacked logs with end grain
+      for (const [lx, ly] of [[-4, 3.6], [4, 3.6], [0, -3.4]]) {
+        ctx.beginPath(); ctx.rect(lx - 7.4, ly - 3.2, 9, 6.4); ctx.fillStyle = '#7b4f2a'; ctx.fill(); out(1.2);
+        ctx.fillStyle = 'rgba(255,220,170,0.25)'; ctx.fillRect(lx - 7.2, ly - 2.9, 8.6, 1.4);
+        ctx.beginPath(); ctx.ellipse(lx + 1.6, ly, 3, 3.2, 0, 0, 7); ctx.fillStyle = '#e2bf88'; ctx.fill(); out(1.2);
+        ctx.beginPath(); ctx.ellipse(lx + 1.6, ly, 1.6, 1.8, 0, 0, 7); ctx.strokeStyle = '#9a6a38'; ctx.lineWidth = 0.6; ctx.stroke();
+      }
+      break;
+    case 2: // stone: two faceted blocks
+      for (const [bx, by, k] of [[-3.4, 2.6, 1], [3.6, 3.4, 0.86]]) {
+        ctx.save(); ctx.translate(bx, by); ctx.scale(k, k);
+        ctx.beginPath(); ctx.moveTo(-5.6, 4.6); ctx.lineTo(-6, -1.6); ctx.lineTo(-2, -5.6); ctx.lineTo(5, -4.2); ctx.lineTo(6, 3.6); ctx.lineTo(1, 5.6); ctx.closePath(); ctx.fillStyle = '#8f959c'; ctx.fill(); out(1.3 / k);
+        ctx.beginPath(); ctx.moveTo(-6, -1.6); ctx.lineTo(-2, -5.6); ctx.lineTo(5, -4.2); ctx.lineTo(0.6, -0.6); ctx.closePath(); ctx.fillStyle = '#c8ced4'; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0.6, -0.6); ctx.lineTo(5, -4.2); ctx.lineTo(6, 3.6); ctx.lineTo(1, 5.6); ctx.closePath(); ctx.fillStyle = '#6c7278'; ctx.fill();
+        ctx.restore();
+      }
+      break;
+    case 3: // gold: coin stack and a bright coin
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.ellipse(-3, 6 - i * 2.6, 5.4, 2.2, 0, 0, 7); ctx.fillStyle = i === 2 ? '#f7d24a' : '#c8951e'; ctx.fill(); out(1.1); }
+      ctx.beginPath(); ctx.arc(3.6, -1.6, 5.6, 0, 7); ctx.fillStyle = '#f2c230'; ctx.fill(); out(1.3);
+      ctx.beginPath(); ctx.arc(3.6, -1.6, 3.8, 0, 7); ctx.strokeStyle = '#b8861a'; ctx.lineWidth = 0.9; ctx.stroke();
+      ctx.beginPath(); ctx.arc(2.4, -3, 1.6, 0, 7); ctx.fillStyle = '#fff6c0'; ctx.fill();
+      break;
+    case 4: { // energy: glowing bolt
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 10); g.addColorStop(0, 'rgba(120,230,255,0.55)'); g.addColorStop(1, 'rgba(120,230,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(-10, -10, 20, 20);
+      ctx.beginPath(); ctx.moveTo(2.4, -9); ctx.lineTo(-6, 1.4); ctx.lineTo(-0.8, 1.4); ctx.lineTo(-3, 9); ctx.lineTo(6.2, -2.2); ctx.lineTo(0.8, -2.2); ctx.closePath();
+      ctx.fillStyle = '#43d2ff'; ctx.fill(); out(1.3);
+      ctx.beginPath(); ctx.moveTo(1.6, -6.6); ctx.lineTo(-3.6, 0.2); ctx.lineTo(-1.6, 0.2); ctx.closePath(); ctx.fillStyle = '#d8f8ff'; ctx.fill();
+      break;
+    }
+    case 5: // population: two people
+      for (const [px, c, k] of [[3.4, '#a89c88', 0.85], [-1.6, '#efe2c4', 1]]) {
+        ctx.save(); ctx.translate(px, 1); ctx.scale(k, k);
+        ctx.beginPath(); ctx.moveTo(-6, 8.6); ctx.quadraticCurveTo(-6, 0, 0, 0); ctx.quadraticCurveTo(6, 0, 6, 8.6); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); out(1.3 / k);
+        ctx.beginPath(); ctx.arc(0, -4.4, 3.6, 0, 7); ctx.fillStyle = c; ctx.fill(); out(1.3 / k);
+        ctx.restore();
+      }
+      break;
   }
   ctx.restore();
+}
+
+// small stat icons for the selection panel, as cached data URLs (for <img>)
+const STATIC = new Map();
+export function statIcon(kind, size = 16) {
+  const key = kind + size;
+  let u = STATIC.get(key);
+  if (u) return u;
+  const cv = document.createElement('canvas'); cv.width = cv.height = size * 2;
+  const c = cv.getContext('2d'); c.scale(size / 5, size / 5); c.translate(5, 5);
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const O = 'rgba(16,10,6,0.95)';
+  const st = (w, col) => { c.strokeStyle = O; c.lineWidth = w + 1; c.stroke(); c.strokeStyle = col; c.lineWidth = w; c.stroke(); };
+  switch (kind) {
+    case 'attack': for (const s of [-1, 1]) { c.beginPath(); c.moveTo(-3.6 * s, 3.6); c.lineTo(3.4 * s, -3.4); st(1.1, '#e8eef4'); c.beginPath(); c.moveTo(-3.6 * s + 1.6 * s, 1.2); c.lineTo(-1.2 * s, 3.6); st(0.9, '#c8a048'); } break;
+    case 'armor': c.beginPath(); c.moveTo(-3.6, -3.4); c.lineTo(3.6, -3.4); c.quadraticCurveTo(3.6, 1.6, 0, 4.2); c.quadraticCurveTo(-3.6, 1.6, -3.6, -3.4); c.closePath(); c.fillStyle = '#7a8a9a'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.9; c.stroke(); c.beginPath(); c.moveTo(0, -3); c.lineTo(0, 3.4); c.strokeStyle = '#d8e0e8'; c.lineWidth = 0.8; c.stroke(); break;
+    case 'range': c.beginPath(); c.arc(0, 0, 3.8, 0, 7); c.fillStyle = '#e8e0cc'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.8; c.stroke(); c.beginPath(); c.arc(0, 0, 2.4, 0, 7); c.fillStyle = '#c8402e'; c.fill(); c.beginPath(); c.arc(0, 0, 1, 0, 7); c.fillStyle = '#e8e0cc'; c.fill(); c.beginPath(); c.moveTo(4.6, -4.6); c.lineTo(0, 0); st(0.7, '#6a4a2a'); break;
+    case 'speed': c.beginPath(); c.moveTo(-4, -1.6); c.lineTo(1, -1.6); c.lineTo(1, -3.6); c.lineTo(4.4, 0); c.lineTo(1, 3.6); c.lineTo(1, 1.6); c.lineTo(-4, 1.6); c.closePath(); c.fillStyle = '#9ad0ff'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.8; c.stroke(); break;
+    case 'hp': c.beginPath(); c.moveTo(0, 3.8); c.bezierCurveTo(-5, 0, -3.6, -4.6, 0, -2); c.bezierCurveTo(3.6, -4.6, 5, 0, 0, 3.8); c.fillStyle = '#e04a3a'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.8; c.stroke(); break;
+    case 'carry': c.beginPath(); c.moveTo(-1.6, -3.4); c.quadraticCurveTo(-4.4, 0, -3.4, 3.8); c.lineTo(3.4, 3.8); c.quadraticCurveTo(4.4, 0, 1.6, -3.4); c.closePath(); c.fillStyle = '#c8a46a'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.8; c.stroke(); c.beginPath(); c.moveTo(-1.8, -2.4); c.lineTo(1.8, -2.4); c.strokeStyle = '#6a4a24'; c.lineWidth = 0.7; c.stroke(); break;
+    case 'build': c.beginPath(); c.moveTo(-3.6, 3.6); c.lineTo(1.4, -1.4); st(1.1, '#8a6040'); c.beginPath(); c.rect(-0.2, -4.4, 4.6, 2.4); c.fillStyle = '#9aa0a8'; c.fill(); c.strokeStyle = O; c.lineWidth = 0.7; c.stroke(); break;
+  }
+  u = cv.toDataURL('image/png');
+  STATIC.set(key, u);
+  return u;
 }
 
 // tight bounding box (in sprite px) of a cached building sprite, ignoring
