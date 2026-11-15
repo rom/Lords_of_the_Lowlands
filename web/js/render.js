@@ -1156,7 +1156,7 @@ export class Renderer {
   // clouds, explored = dimmed), team dots, alerts, camera frustum and frame.
   // alerts: optional [{x, y, t}] (t = time the alert was raised, seconds,
   // performance.now()/1000 or Renderer.time; only used for the pulse phase).
-  minimap(mcv, ents, fog, you, alerts) {
+  minimap(mcv, ents, fog, you, alerts, opts) {
     const mctx = mcv.getContext('2d');
     const S = mcv.width;
     if (!this.w) return;
@@ -1167,20 +1167,38 @@ export class Renderer {
       const { w, h, tiles } = this;
       const img = c.createImageData(w, h);
       const hgt = (t) => t === T_MTN ? 3 : t === T_WATER ? -1 : t === T_SHALLOW ? -0.5 : 0;
+      // gentle rolling relief from noise plus tile heights, lit from the upper left
+      const rel = new Float32Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; rel[i] = hgt(tiles[i]) + fbm(x * 0.09, y * 0.09, 3, 7) * 1.6; }
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const i = y * w + x, t = tiles[i];
         const col = this.th.t[t] || this.th.t[0];
-        let n = 0.9 + hash2(x, y) * 0.14 + (fbm(x * 0.15, y * 0.15, 2, 1) - 0.5) * 0.25;
-        // relief: light from the upper left
-        const dh = hgt(t) - hgt(tiles[Math.max(0, y - 1) * w + Math.max(0, x - 1)]);
-        n *= 1 + dh * 0.12;
-        if (t === T_WATER && this.shore) n *= 1 - Math.min(0.35, this.shore[i] * 0.04);
-        if (t !== T_WATER && this.shore && this.shore[i] === 0 && ((x > 0 && tiles[i - 1] === T_WATER) || (y > 0 && tiles[i - w] === T_WATER) || (x < w - 1 && tiles[i + 1] === T_WATER) || (y < h - 1 && tiles[i + w] === T_WATER))) n *= 1.18;
-        img.data[i * 4] = col[0] * n; img.data[i * 4 + 1] = col[1] * n; img.data[i * 4 + 2] = col[2] * n; img.data[i * 4 + 3] = 255;
+        let n = 0.92 + hash2(x, y) * 0.1 + (fbm(x * 0.15, y * 0.15, 2, 1) - 0.5) * 0.22;
+        const water = t === T_WATER || t === T_SHALLOW;
+        if (!water) {
+          const dh = rel[i] - rel[Math.max(0, y - 1) * w + Math.max(0, x - 1)];
+          n *= 1 + Math.max(-0.3, Math.min(0.3, dh * 0.16));
+          if (t === T_MTN) { // snowy peaks inside mountain ranges
+            let m = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = Math.min(w - 1, Math.max(0, x + dx)), yy = Math.min(h - 1, Math.max(0, y + dy)); if (tiles[yy * w + xx] === T_MTN) m++; }
+            if (m === 9 && hash2(x, y, 3) < 0.7) { img.data[i * 4] = 236; img.data[i * 4 + 1] = 238; img.data[i * 4 + 2] = 242; img.data[i * 4 + 3] = 255; continue; }
+          }
+        }
+        let r = col[0], g = col[1], b = col[2];
+        if (water && this.shore) { // deeper water darker and bluer, a light rim along the shore
+          const d = Math.min(1, this.shore[i] * 0.09);
+          n *= 1.06 - d * 0.32; r *= 1 - d * 0.25; g *= 1 - d * 0.1;
+          if (this.shore[i] <= 1) { r = r * 0.7 + 60; g = g * 0.7 + 70; b = b * 0.7 + 72; }
+        }
+        if (!water && this.shore && this.shore[i] === 0 && ((x > 0 && tiles[i - 1] === T_WATER) || (y > 0 && tiles[i - w] === T_WATER) || (x < w - 1 && tiles[i + 1] === T_WATER) || (y < h - 1 && tiles[i + w] === T_WATER))) n *= 1.18;
+        img.data[i * 4] = r * n; img.data[i * 4 + 1] = g * n; img.data[i * 4 + 2] = b * n; img.data[i * 4 + 3] = 255;
       }
       const tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h; tmp.getContext('2d').putImageData(img, 0, 0);
       c.fillStyle = '#07090c'; c.fillRect(0, 0, S, S);
       c.save(); this.miniTransform(c, S); c.imageSmoothingEnabled = true; c.drawImage(tmp, 0, 0); c.restore();
+      // soft inner shading along the map edge
+      const D0 = [this.miniPoint(0, 0, S), this.miniPoint(this.w, 0, S), this.miniPoint(this.w, this.h, S), this.miniPoint(0, this.h, S)];
+      c.save(); c.beginPath(); D0.forEach((p, i) => i ? c.lineTo(...p) : c.moveTo(...p)); c.closePath(); c.clip();
+      c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = S * 0.05; c.stroke(); c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = S * 0.02; c.stroke(); c.restore();
       // cloud texture for unexplored areas
       this.miniCloud = document.createElement('canvas'); this.miniCloud.width = S; this.miniCloud.height = S;
       const cc = this.miniCloud.getContext('2d'); const ci = cc.createImageData(S, S);
@@ -1215,8 +1233,11 @@ export class Renderer {
       mctx.drawImage(this.miniFogLayer, 0, 0);
     }
     // entities: team-coloured dots with a dark outline (client data is fog-filtered already)
+    // resources: small squares; buildings: map-aligned team squares with a
+    // lit edge; units: round team dots (own units with a light core)
     const k = S * 0.94 / (this.w + this.h);
-    const dot = Math.max(2, k * 1.6);
+    const dot = Math.max(2, k * 1.6), ur = Math.max(1.3, dot * 0.62);
+    const units = [];
     for (const e of ents) {
       const [px, py] = this.miniPoint(e.x, e.y, S);
       if (e.k === 2) {
@@ -1225,17 +1246,25 @@ export class Renderer {
         mctx.fillRect(px - dot * 0.4, py - dot * 0.4, dot * 0.8, dot * 0.8);
         continue;
       }
+      if (e.k !== 1) { units.push(e); continue; }
       const col = e.o < 0 ? '#e8d8b0' : TEAM[e.o] || '#888';
-      if (e.k === 1) {
-        const sz = (e.def ? e.def.size : 1) * k;
-        mctx.fillStyle = 'rgba(0,0,0,0.75)';
-        mctx.beginPath(); mctx.moveTo(px, py - sz - 1); mctx.lineTo(px + sz + 1, py); mctx.lineTo(px, py + sz + 1); mctx.lineTo(px - sz - 1, py); mctx.closePath(); mctx.fill();
-        mctx.fillStyle = col;
-        mctx.beginPath(); mctx.moveTo(px, py - sz); mctx.lineTo(px + sz, py); mctx.lineTo(px, py + sz); mctx.lineTo(px - sz, py); mctx.closePath(); mctx.fill();
-      } else {
-        mctx.fillStyle = 'rgba(0,0,0,0.75)'; mctx.fillRect(px - dot / 2 - 1, py - dot / 2 - 1, dot + 2, dot + 2);
-        mctx.fillStyle = col; mctx.fillRect(px - dot / 2, py - dot / 2, dot, dot);
-      }
+      const sz = Math.max(1.6, (e.def ? e.def.size : 1) * k);
+      mctx.fillStyle = 'rgba(0,0,0,0.8)';
+      mctx.beginPath(); mctx.moveTo(px, py - sz - 1.2); mctx.lineTo(px + sz + 1.2, py); mctx.lineTo(px, py + sz + 1.2); mctx.lineTo(px - sz - 1.2, py); mctx.closePath(); mctx.fill();
+      mctx.fillStyle = col;
+      mctx.beginPath(); mctx.moveTo(px, py - sz); mctx.lineTo(px + sz, py); mctx.lineTo(px, py + sz); mctx.lineTo(px - sz, py); mctx.closePath(); mctx.fill();
+      mctx.strokeStyle = 'rgba(255,255,255,0.45)'; mctx.lineWidth = Math.max(0.8, sz * 0.18);
+      mctx.beginPath(); mctx.moveTo(px - sz, py); mctx.lineTo(px, py - sz); mctx.lineTo(px + sz, py); mctx.stroke();
+    }
+    // units on top of buildings: dark rims batched in one path, then colours
+    mctx.fillStyle = 'rgba(0,0,0,0.78)'; mctx.beginPath();
+    for (const e of units) { const [px, py] = this.miniPoint(e.x, e.y, S); mctx.moveTo(px + ur + 1, py); mctx.arc(px, py, ur + 1, 0, 7); }
+    mctx.fill();
+    for (const e of units) {
+      const [px, py] = this.miniPoint(e.x, e.y, S);
+      mctx.fillStyle = e.o < 0 ? '#e8d8b0' : TEAM[e.o] || '#888';
+      mctx.beginPath(); mctx.arc(px, py, ur, 0, 7); mctx.fill();
+      if (e.o === you && ur > 1.6) { mctx.fillStyle = 'rgba(255,255,255,0.75)'; mctx.fillRect(px - ur * 0.35, py - ur * 0.35, ur * 0.5, ur * 0.5); }
     }
     // alerts: pulsing red rings
     if (alerts && alerts.length) {
@@ -1243,32 +1272,47 @@ export class Renderer {
       for (const a of alerts) {
         if (!a) continue;
         const [px, py] = this.miniPoint(a.x, a.y, S);
-        const ph = ((now - (a.t || 0)) * 1.4) % 1;
+        const age = now - (a.t || 0), ph = (age * 1.4) % 1;
         for (const off of [0, 0.5]) {
-          const f = (ph + off) % 1;
+          const f = (ph + off) % 1, R = S * 0.014 + f * S * 0.055;
           mctx.strokeStyle = `rgba(255,60,40,${0.9 * (1 - f)})`; mctx.lineWidth = Math.max(1.5, S / 180);
-          mctx.beginPath(); mctx.arc(px, py, S * 0.012 + f * S * 0.05, 0, 7); mctx.stroke();
+          mctx.beginPath(); mctx.moveTo(px, py - R); mctx.lineTo(px + R, py); mctx.lineTo(px, py + R); mctx.lineTo(px - R, py); mctx.closePath(); mctx.stroke();
         }
-        mctx.fillStyle = '#ff4a30'; mctx.beginPath(); mctx.arc(px, py, Math.max(1.5, S / 160), 0, 7); mctx.fill();
+        // warning marker: dark-rimmed red diamond with an exclamation mark
+        const M = Math.max(4, S / 55);
+        mctx.fillStyle = 'rgba(0,0,0,0.75)'; mctx.beginPath(); mctx.moveTo(px, py - M - 1.5); mctx.lineTo(px + M + 1.5, py); mctx.lineTo(px, py + M + 1.5); mctx.lineTo(px - M - 1.5, py); mctx.closePath(); mctx.fill();
+        mctx.fillStyle = age % 0.6 < 0.3 ? '#ff6a40' : '#d8301c'; mctx.beginPath(); mctx.moveTo(px, py - M); mctx.lineTo(px + M, py); mctx.lineTo(px, py + M); mctx.lineTo(px - M, py); mctx.closePath(); mctx.fill();
+        mctx.fillStyle = '#fff'; mctx.fillRect(px - M * 0.12, py - M * 0.55, M * 0.24, M * 0.62); mctx.fillRect(px - M * 0.12, py + M * 0.2, M * 0.24, M * 0.22);
       }
     }
     // camera frustum
     const pts = [this.toWorld(0, 0), this.toWorld(this.W, 0), this.toWorld(this.W, this.H), this.toWorld(0, this.H)].map(([x, y]) => this.miniPoint(x, y, S));
     mctx.lineJoin = 'round';
-    mctx.strokeStyle = 'rgba(0,0,0,0.6)'; mctx.lineWidth = Math.max(2.5, S / 110);
-    mctx.beginPath(); pts.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath(); mctx.stroke();
-    mctx.strokeStyle = '#ffffff'; mctx.lineWidth = Math.max(1, S / 260); mctx.stroke();
-    // decorative frame around the map diamond
+    mctx.beginPath(); pts.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath();
+    mctx.fillStyle = 'rgba(255,255,255,0.07)'; mctx.fill();
+    mctx.strokeStyle = 'rgba(0,0,0,0.6)'; mctx.lineWidth = Math.max(2.5, S / 110); mctx.stroke();
+    mctx.strokeStyle = 'rgba(255,255,255,0.9)'; mctx.lineWidth = Math.max(1, S / 260); mctx.stroke();
+    // bright corner brackets on the view frame
+    mctx.strokeStyle = '#ffffff'; mctx.lineWidth = Math.max(1.6, S / 150); mctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const p = pts[i], a = pts[(i + 3) % 4], b = pts[(i + 1) % 4], q = 0.22;
+      mctx.moveTo(p[0] + (a[0] - p[0]) * q, p[1] + (a[1] - p[1]) * q); mctx.lineTo(p[0], p[1]); mctx.lineTo(p[0] + (b[0] - p[0]) * q, p[1] + (b[1] - p[1]) * q);
+    }
+    mctx.stroke();
+    // decorative frame around the map diamond, in the era's HUD metal
+    const era = (opts && opts.era) || this.hudEra || 'medieval';
+    const FR = era === 'future' ? ['#08202c', '#3cc8f0', 'rgba(200,250,255,0.6)', '#8ff0ff', '#1a5a70'] : era === 'space' ? ['#2a1a08', '#f0a848', 'rgba(255,230,190,0.6)', '#ffd08a', '#7a4a14']
+      : era === 'industrial' || era === 'modern' ? ['#16191c', '#8d9aa8', 'rgba(240,248,255,0.6)', '#c8d4e0', '#4a5460'] : ['#2a1e10', '#c9a24e', 'rgba(255,240,190,0.5)', '#d8b25a', '#7a5a24'];
     const D = [this.miniPoint(0, 0, S), this.miniPoint(this.w, 0, S), this.miniPoint(this.w, this.h, S), this.miniPoint(0, this.h, S)];
     const fw = Math.max(2, S / 120);
     mctx.beginPath(); D.forEach((p, i) => i ? mctx.lineTo(...p) : mctx.moveTo(...p)); mctx.closePath();
-    mctx.strokeStyle = '#2a1e10'; mctx.lineWidth = fw * 2.2; mctx.stroke();
-    mctx.strokeStyle = '#c9a24e'; mctx.lineWidth = fw; mctx.stroke();
-    mctx.strokeStyle = 'rgba(255,240,190,0.5)'; mctx.lineWidth = fw * 0.3; mctx.stroke();
+    mctx.strokeStyle = FR[0]; mctx.lineWidth = fw * 2.2; mctx.stroke();
+    mctx.strokeStyle = FR[1]; mctx.lineWidth = fw; mctx.stroke();
+    mctx.strokeStyle = FR[2]; mctx.lineWidth = fw * 0.3; mctx.stroke();
     for (const p of D) {
-      mctx.fillStyle = '#2a1e10'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 2.4, 0, 7); mctx.fill();
-      mctx.fillStyle = '#d8b25a'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 1.6, 0, 7); mctx.fill();
-      mctx.fillStyle = '#7a5a24'; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 0.7, 0, 7); mctx.fill();
+      mctx.fillStyle = FR[0]; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 2.4, 0, 7); mctx.fill();
+      mctx.fillStyle = FR[3]; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 1.6, 0, 7); mctx.fill();
+      mctx.fillStyle = FR[4]; mctx.beginPath(); mctx.arc(p[0], p[1], fw * 0.7, 0, 7); mctx.fill();
     }
     mctx.restore();
   }

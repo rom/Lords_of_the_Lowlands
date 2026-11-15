@@ -78,16 +78,19 @@ function pose(a, K) {
 
 // additive soft glow (energy weapons, embers); cached unit gradient
 function glow(ctx, x, y, r, c, a = 1) {
+  if (LO) return;
   const g = grad(ctx, 'gl' + c, () => { const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1); g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.28, `rgba(${c},0.8)`); g.addColorStop(1, `rgba(${c},0)`); return g; });
   ctx.save(); ctx.globalAlpha *= a; ctx.globalCompositeOperation = 'lighter'; ctx.translate(x, y); ctx.scale(r, r); ctx.fillStyle = g; ctx.fillRect(-1, -1, 2, 2); ctx.restore();
 }
 // metal sheen: short bright stroke
-function sheen(ctx, x0, y0, x1, y1, w = 0.45, a = 0.7) { seg(ctx, x0, y0, x1, y1, w, `rgba(255,255,255,${a})`); }
+let LO = false; // low detail pass in progress (drawHuman with lod)
+function ol(ctx, w) { if (!LO) { ctx.strokeStyle = OL; ctx.lineWidth = w; ctx.stroke(); } }
+function sheen(ctx, x0, y0, x1, y1, w = 0.45, a = 0.7) { if (!LO) seg(ctx, x0, y0, x1, y1, w, `rgba(255,255,255,${a})`); }
 // helmet dome with light from the upper left
 function dome(ctx, hx, hy, r, col, ry = r) {
   ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(hx, hy, r, ry, 0, Math.PI, 0); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = OL; ctx.lineWidth = 0.55; ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.beginPath(); ctx.ellipse(hx - r * 0.3, hy - ry * 0.55, r * 0.38, ry * 0.22, -0.35, 0, TAU); ctx.fill();
+  ol(ctx, 0.55);
+  if (!LO) { ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.beginPath(); ctx.ellipse(hx - r * 0.3, hy - ry * 0.55, r * 0.38, ry * 0.22, -0.35, 0, TAU); ctx.fill(); }
 }
 
 // helmets and hats of soldiers (workers: workerHat)
@@ -117,18 +120,18 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
       ctx.fillStyle = sh(met, 0.7); ctx.fillRect(hx - 3.7, hy - 0.9, 7.4, 0.7); // brow band
       if (era === 'bronze') { // horsehair crest in team colour
         ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 3.4, hy - 3.4); ctx.quadraticCurveTo(hx - 0.4, hy - 8.4, hx + 3, hy - 3.6); ctx.lineTo(hx, hy - 4.6); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke();
+        ol(ctx, 0.4);
       } else { ctx.fillStyle = '#5a5e64'; ctx.fillRect(hx - 0.6, hy - 6.2, 1.2, 2.5); circ(ctx, hx, hy - 6.4, 0.9, '#7a7e86'); }
       break;
     }
     case 'classical': {
       if (sprite === 'bow') { // Phrygian cap in team colour
         ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 3.4, hy); ctx.quadraticCurveTo(hx - 3.6, hy - 4.6, hx + 0.4, hy - 4.4); ctx.quadraticCurveTo(hx + 3.4, hy - 4.8, hx + 2.4, hy - 2.2); ctx.lineTo(hx + 3.2, hy - 0.6); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke(); ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(hx - 2.6, hy - 3.6, 1.2, 2.6);
+        ol(ctx, 0.5); ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(hx - 2.6, hy - 3.6, 1.2, 2.6);
         break;
       }
       if (sprite === 'lance') { // conical helm with mail aventail
-        ctx.fillStyle = '#9aa0a8'; ctx.beginPath(); ctx.moveTo(hx - 3.6, hy - 0.4); ctx.lineTo(hx, hy - 6); ctx.lineTo(hx + 3.6, hy - 0.4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ctx.fillStyle = '#9aa0a8'; ctx.beginPath(); ctx.moveTo(hx - 3.6, hy - 0.4); ctx.lineTo(hx, hy - 6); ctx.lineTo(hx + 3.6, hy - 0.4); ctx.closePath(); ctx.fill(); ol(ctx, 0.5);
         ctx.fillStyle = '#7a8088'; ctx.fillRect(hx - 3.6, hy - 0.4, 2.6, 3.8); sheen(ctx, hx - 1.4, hy - 3.8, hx - 0.6, hy - 5.2);
         break;
       }
@@ -144,7 +147,7 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
     case 'medieval': {
       if (sprite === 'greatsword' || sprite === 'templar' || sprite === 'lance') { // great helm with a crest plume
         ctx.fillStyle = '#a8aeb6'; ctx.beginPath(); ctx.moveTo(hx - 3.7, hy + 2.9); ctx.lineTo(hx - 3.7, hy - 2); ctx.quadraticCurveTo(hx, hy - 5.3, hx + 3.7, hy - 2); ctx.lineTo(hx + 3.7, hy + 2.9); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.55; ctx.stroke();
+        ol(ctx, 0.55);
         ctx.fillStyle = '#d8dde4'; ctx.fillRect(hx - 3, hy - 2.4, 1.6, 5);
         ctx.fillStyle = '#1a1a1e'; ctx.fillRect(hx + 0.3, hy - 0.9, 3.4, 0.9); // vision slit
         ctx.fillStyle = 'rgba(0,0,0,0.55)'; for (let i = 0; i < 3; i++) ctx.fillRect(hx + 1.6 + i * 0.7, hy + 1, 0.35, 0.35); // breaths
@@ -152,7 +155,7 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
         ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 0.6, hy - 4.4); ctx.quadraticCurveTo(hx - 3.8, hy - 8.4 + Math.sin(t * 3) * 0.3, hx - 5.2, hy - 5.4); ctx.quadraticCurveTo(hx - 2.6, hy - 6, hx + 0.8, hy - 4.2); ctx.fill();
       } else if (sprite === 'crossbow') { // kettle hat
         dome(ctx, hx, hy - 1, 3.2, '#9aa0a8', 3.4);
-        ctx.fillStyle = '#868c94'; ctx.beginPath(); ctx.ellipse(hx, hy - 1.1, 5, 1.2, 0, 0, TAU); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+        ctx.fillStyle = '#868c94'; ctx.beginPath(); ctx.ellipse(hx, hy - 1.1, 5, 1.2, 0, 0, TAU); ctx.fill(); ol(ctx, 0.45);
         sheen(ctx, hx - 4, hy - 1.5, hx - 1, hy - 1.9, 0.4, 0.6);
       } else if (sprite === 'longbow') { // hood with liripipe
         const hc = '#5a6a3a';
@@ -162,7 +165,7 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
       } else { // nasal helm over a mail coif
         ctx.fillStyle = '#80868e'; ctx.fillRect(hx - 3.7, hy - 0.4, 2.6, 3.8);
         ctx.fillStyle = '#9aa0a8'; ctx.beginPath(); ctx.moveTo(hx - 3.7, hy); ctx.quadraticCurveTo(hx - 3.1, hy - 5.6, hx + 0.2, hy - 5.7); ctx.quadraticCurveTo(hx + 3.7, hy - 4.1, hx + 3.7, hy); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ol(ctx, 0.5);
         ctx.fillStyle = '#d8dde4'; ctx.fillRect(hx - 2.6, hy - 4, 1.3, 3);
         ctx.fillStyle = '#7a8088'; ctx.fillRect(hx + 1.6, hy - 0.6, 0.9, 2.6); // nasal
         if (!lo) { ctx.fillStyle = 'rgba(255,255,255,0.2)'; for (let i = 0; i < 3; i++) ctx.fillRect(hx - 3.5, hy + 0.4 + i * 1.1, 2.2, 0.35); }
@@ -172,13 +175,13 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
     case 'gunpowder': {
       if (sprite === 'pike' || uid === 'arquebusier' || sprite === 'sabre') { // morion / pot helmet
         ctx.fillStyle = '#a4aab2'; ctx.beginPath(); ctx.moveTo(hx - 5, hy - 0.6); ctx.quadraticCurveTo(hx - 2.6, hy - 1.6, hx - 2.8, hy - 3); ctx.quadraticCurveTo(hx, hy - 6.2, hx + 2.8, hy - 3); ctx.quadraticCurveTo(hx + 2.6, hy - 1.6, hx + 5, hy - 0.6); ctx.quadraticCurveTo(hx, hy - 2.2, hx - 5, hy - 0.6); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ol(ctx, 0.5);
         if (sprite !== 'sabre') { ctx.fillStyle = '#8a9098'; ctx.beginPath(); ctx.moveTo(hx - 2.2, hy - 3.6); ctx.quadraticCurveTo(hx, hy - 7.2, hx + 2.2, hy - 3.6); ctx.fill(); } // comb
         else { ctx.fillStyle = '#8a9098'; ctx.fillRect(hx - 3.6, hy - 2, 1.4, 4.4); for (let i = 0; i < 3; i++) seg(ctx, hx + 1.4, hy - 2 + i * 0.4, hx + 1.4, hy + 2, 0.3, '#5a6068'); }
         sheen(ctx, hx - 1.6, hy - 3.6, hx - 0.4, hy - 4.6);
         if (uid === 'arquebusier') { ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 1.6, hy - 4); ctx.quadraticCurveTo(hx - 5.6, hy - 7 + Math.sin(t * 2.4) * 0.4, hx - 6.4, hy - 3.6); ctx.quadraticCurveTo(hx - 4, hy - 4.8, hx - 1.2, hy - 3.2); ctx.fill(); }
       } else if (sprite === 'grenadier') { // mitre cap in team colour with a brass plate
-        ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 3.2, hy - 1.4); ctx.lineTo(hx - 1.6, hy - 8.4); ctx.quadraticCurveTo(hx + 0.6, hy - 8.6, hx + 0.8, hy - 7.6); ctx.lineTo(hx + 3.2, hy - 1.4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 3.2, hy - 1.4); ctx.lineTo(hx - 1.6, hy - 8.4); ctx.quadraticCurveTo(hx + 0.6, hy - 8.6, hx + 0.8, hy - 7.6); ctx.lineTo(hx + 3.2, hy - 1.4); ctx.closePath(); ctx.fill(); ol(ctx, 0.5);
         ctx.fillStyle = '#d8b04a'; ctx.beginPath(); ctx.moveTo(hx - 0.2, hy - 1.6); ctx.lineTo(hx + 0.4, hy - 6.6); ctx.lineTo(hx + 2.8, hy - 1.6); ctx.closePath(); ctx.fill();
         circ(ctx, hx - 1.3, hy - 8.2, 0.8, '#f0e8d8');
         ctx.fillStyle = '#f0ece0'; ctx.fillRect(hx - 3.2, hy - 2, 6.4, 0.7);
@@ -197,18 +200,18 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
         ctx.fillStyle = '#d0a848'; ctx.beginPath(); ctx.moveTo(hx - 0.8, hy - 4.2); ctx.lineTo(hx, hy - 7.4); ctx.lineTo(hx + 0.8, hy - 4.2); ctx.closePath(); ctx.fill(); circ(ctx, hx + 0.6, hy - 2.4, 0.9, tc);
       } else if (sprite === 'smg') { // coal-scuttle steel helmet
         ctx.fillStyle = '#5c6458'; ctx.beginPath(); ctx.moveTo(hx - 4.4, hy + 1.6); ctx.lineTo(hx - 3.6, hy - 1); ctx.quadraticCurveTo(hx - 3, hy - 5, hx + 0.4, hy - 5); ctx.quadraticCurveTo(hx + 3.8, hy - 4.6, hx + 3.6, hy - 0.8); ctx.lineTo(hx + 4.6, hy - 0.4); ctx.lineTo(hx + 3.4, hy + 0.2); ctx.lineTo(hx - 2.4, hy - 0.2); ctx.lineTo(hx - 3, hy + 1.6); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke(); sheen(ctx, hx - 2, hy - 3.6, hx - 0.4, hy - 4.4, 0.5, 0.35); circ(ctx, hx - 1.4, hy - 1.6, 0.6, '#3a4038');
+        ol(ctx, 0.5); sheen(ctx, hx - 2, hy - 3.6, hx - 0.4, hy - 4.4, 0.5, 0.35); circ(ctx, hx - 1.4, hy - 1.6, 0.6, '#3a4038');
         ctx.fillStyle = tc; ctx.fillRect(hx - 2.8, hy - 2.6, 1.2, 1.2);
       } else if (sprite === 'mg') { // wide-brimmed steel helmet
-        ctx.fillStyle = '#6a6a4a'; ctx.beginPath(); ctx.ellipse(hx, hy - 1.2, 5.2, 1.4, 0, 0, TAU); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+        ctx.fillStyle = '#6a6a4a'; ctx.beginPath(); ctx.ellipse(hx, hy - 1.2, 5.2, 1.4, 0, 0, TAU); ctx.fill(); ol(ctx, 0.45);
         dome(ctx, hx, hy - 1.4, 3, '#727252', 3.2); ctx.fillStyle = tc; ctx.fillRect(hx - 1, hy - 2.8, 2, 0.8);
       } else if (sprite === 'lance') { // lancer's square-topped cap
         ctx.fillStyle = '#2a2420'; ctx.fillRect(hx - 2.6, hy - 3.6, 5.2, 1.8);
-        ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 2.4, hy - 3.6); ctx.lineTo(hx - 3.8, hy - 7); ctx.lineTo(hx + 3.8, hy - 7); ctx.lineTo(hx + 2.4, hy - 3.6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+        ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(hx - 2.4, hy - 3.6); ctx.lineTo(hx - 3.8, hy - 7); ctx.lineTo(hx + 3.8, hy - 7); ctx.lineTo(hx + 2.4, hy - 3.6); ctx.closePath(); ctx.fill(); ol(ctx, 0.45);
         ctx.fillStyle = '#e8d8a0'; ctx.fillRect(hx - 3.8, hy - 7.4, 7.6, 0.6); ctx.fillStyle = '#1a1612'; ctx.beginPath(); ctx.moveTo(hx + 1, hy - 1.9); ctx.lineTo(hx + 4.8, hy - 1.4); ctx.lineTo(hx + 1, hy - 1); ctx.fill();
         circ(ctx, hx - 2.6, hy - 8.2, 0.9, '#f0ece0');
       } else { // peaked kepi
-        ctx.fillStyle = '#3e4a3a'; ctx.beginPath(); ctx.moveTo(hx - 3.2, hy - 1.6); ctx.lineTo(hx - 2.8, hy - 5.6); ctx.lineTo(hx + 2.6, hy - 5); ctx.lineTo(hx + 3, hy - 1.6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+        ctx.fillStyle = '#3e4a3a'; ctx.beginPath(); ctx.moveTo(hx - 3.2, hy - 1.6); ctx.lineTo(hx - 2.8, hy - 5.6); ctx.lineTo(hx + 2.6, hy - 5); ctx.lineTo(hx + 3, hy - 1.6); ctx.closePath(); ctx.fill(); ol(ctx, 0.45);
         ctx.fillStyle = '#1e241c'; ctx.beginPath(); ctx.moveTo(hx + 1, hy - 1.8); ctx.lineTo(hx + 5, hy - 1.2); ctx.lineTo(hx + 1, hy - 0.9); ctx.fill();
         ctx.fillStyle = tc; ctx.fillRect(hx - 3, hy - 2.6, 6, 0.9); circ(ctx, hx + 1.2, hy - 3.6, 0.5, '#d8b04a');
       }
@@ -219,7 +222,7 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
         ctx.fillStyle = '#26282a'; ctx.beginPath(); ctx.arc(hx, hy, 3.1, 0, TAU); ctx.fill();
         ctx.fillStyle = skin; ctx.fillRect(hx + 0.6, hy - 1.2, 2.5, 1.5);
         ctx.fillStyle = '#111'; ctx.fillRect(hx + 0.9, hy - 1.1, 2.4, 1.1); ctx.fillStyle = '#5ad0ff'; ctx.fillRect(hx + 2, hy - 1, 0.9, 0.4);
-        ctx.fillStyle = tc; ctx.beginPath(); ctx.ellipse(hx - 0.6, hy - 2.6, 3.6, 1.5, -0.15, 0, TAU); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke();
+        ctx.fillStyle = tc; ctx.beginPath(); ctx.ellipse(hx - 0.6, hy - 2.6, 3.6, 1.5, -0.15, 0, TAU); ctx.fill(); ol(ctx, 0.4);
         circ(ctx, hx - 2.4, hy - 2.6, 0.5, '#d8b04a');
         break;
       }
@@ -235,7 +238,7 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
     case 'future': case 'space': {
       const g = grad(ctx, 'helm' + era, () => { const g = ctx.createRadialGradient(-1.2, -1.6, 0.4, 0, 0, 4.4); g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, era === 'space' ? '#b8c2d0' : '#d6dde6'); g.addColorStop(1, era === 'space' ? '#56606e' : '#8a96a4'); return g; });
       ctx.beginPath(); ctx.arc(hx, hy, 4.2, 0, TAU); fillAt(ctx, hx, hy, g);
-      ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+      ol(ctx, 0.5);
       const vc = sprite === 'templar' ? '#7cf1ff' : era === 'space' ? '#ffb84a' : '#39d4ff';
       if (sprite === 'templar') { // hooded helm with a glowing slit
         ctx.fillStyle = '#3a3048'; ctx.beginPath(); ctx.arc(hx - 0.4, hy - 0.4, 4.6, Math.PI * 0.7, Math.PI * 2.02); ctx.lineTo(hx - 3.6, hy + 3.6); ctx.closePath(); ctx.fill();
@@ -256,13 +259,13 @@ function headgear(ctx, era, sprite, uid, tc, hx, hy, skin, lo, t) {
 function hood(ctx, hx, hy, c) {
   ctx.fillStyle = c; ctx.beginPath(); ctx.arc(hx - 0.5, hy - 0.3, 3.75, Math.PI * 0.6, Math.PI * 1.9); ctx.quadraticCurveTo(hx + 1.6, hy - 1.9, hx + 0.2, hy - 0.6);
   ctx.quadraticCurveTo(hx - 0.8, hy + 1.4, hx + 0.6, hy + 3.5); ctx.lineTo(hx - 3.6, hy + 3.7); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+  ol(ctx, 0.45);
   ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(hx + 2.6, hy - 1.6); ctx.quadraticCurveTo(hx + 0.6, hy - 1.4, hx + 0.1, hy + 0.4); ctx.stroke();
 }
 // workers' hats, varied per person and era
 function workerHat(ctx, era, L, tc, hx, hy) {
   const v = L.hat;
-  const scarf = (c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(hx - 0.3, hy - 0.6, 3.4, Math.PI * 0.8, Math.PI * 1.93); ctx.lineTo(hx + 0.8, hy - 1.5); ctx.quadraticCurveTo(hx - 1.4, hy + 0.2, hx - 4.4, hy + 2.8); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke(); seg(ctx, hx - 3, hy - 2.4, hx + 2, hy - 3, 0.4, 'rgba(0,0,0,0.2)'); circ(ctx, hx - 3.4, hy + 1.4, 0.8, sh(c, 0.85)); };
+  const scarf = (c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(hx - 0.3, hy - 0.6, 3.4, Math.PI * 0.8, Math.PI * 1.93); ctx.lineTo(hx + 0.8, hy - 1.5); ctx.quadraticCurveTo(hx - 1.4, hy + 0.2, hx - 4.4, hy + 2.8); ctx.closePath(); ctx.fill(); ol(ctx, 0.4); seg(ctx, hx - 3, hy - 2.4, hx + 2, hy - 3, 0.4, 'rgba(0,0,0,0.2)'); circ(ctx, hx - 3.4, hy + 1.4, 0.8, sh(c, 0.85)); };
   const straw = (w, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(hx, hy - 2, w, 1.3, 0, 0, TAU); ctx.fill(); ctx.beginPath(); ctx.arc(hx, hy - 2.2, 2.4, Math.PI, 0); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.beginPath(); ctx.ellipse(hx, hy - 2, w, 1.3, 0, 0, TAU); ctx.stroke(); seg(ctx, hx - 2.4, hy - 2.3, hx + 2.4, hy - 2.3, 0.6, sh(c, 0.6)); };
   switch (era) {
     case 'stone':
@@ -296,7 +299,7 @@ function workerHat(ctx, era, L, tc, hx, hy) {
     case 'modern': {
       const c = ['#f2c230', '#f4f4ee', '#ee7a22', '#f2c230'][v];
       ctx.fillStyle = c; ctx.beginPath(); ctx.arc(hx, hy - 0.6, 3.4, Math.PI, 0); ctx.fill(); ctx.fillRect(hx - 3.6, hy - 0.9, 7.6, 0.9);
-      ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke(); seg(ctx, hx, hy - 4, hx, hy - 1, 0.6, sh(c, 0.8));
+      ol(ctx, 0.4); seg(ctx, hx, hy - 4, hx, hy - 1, 0.6, sh(c, 0.8));
       ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(hx - 1.8, hy - 3.4, 1.3, 0.7);
       break;
     }
@@ -314,7 +317,7 @@ function weapon(ctx, sprite, era, uid, busy, t, lo) {
     case 'club': { // knotted club with a lashed stone
       ctx.strokeStyle = OL; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 1.4); ctx.lineTo(0.2, -8.6); ctx.stroke();
       ctx.strokeStyle = '#7a4e28'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, 1.2); ctx.lineTo(0.1, -5); ctx.stroke();
-      ctx.fillStyle = '#6b4424'; ctx.beginPath(); ctx.moveTo(-0.8, -4.6); ctx.quadraticCurveTo(-1.8, -9, 0, -10.6); ctx.quadraticCurveTo(2.2, -9.4, 1.2, -4.6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+      ctx.fillStyle = '#6b4424'; ctx.beginPath(); ctx.moveTo(-0.8, -4.6); ctx.quadraticCurveTo(-1.8, -9, 0, -10.6); ctx.quadraticCurveTo(2.2, -9.4, 1.2, -4.6); ctx.closePath(); ctx.fill(); ol(ctx, 0.5);
       circ(ctx, 1.4, -8.4, 1.5, '#8a8680'); circ(ctx, 1, -8.8, 0.5, '#c8c4bc');
       seg(ctx, -0.6, -7.2, 1.6, -7.6, 0.5, '#c8a878'); seg(ctx, -0.4, -6.4, 1.4, -6.8, 0.5, '#c8a878');
       if (!lo) { circ(ctx, -0.9, -6, 0.5, '#5a3818'); sheen(ctx, -0.5, -9.4, -0.6, -6, 0.4, 0.3); }
@@ -326,14 +329,14 @@ function weapon(ctx, sprite, era, uid, busy, t, lo) {
       if (era === 'stone') { ctx.moveTo(-0.2, -9.6); ctx.lineTo(3.4, -10.6); ctx.lineTo(4.8, -7.6); ctx.lineTo(3.6, -5.4); ctx.lineTo(-0.2, -6.8); ctx.fillStyle = '#7a7670'; }
       else if (era === 'bronze') { ctx.moveTo(0, -9.6); ctx.quadraticCurveTo(3, -10, 4.6, -12); ctx.quadraticCurveTo(5.6, -7.8, 4.6, -3.8); ctx.quadraticCurveTo(3, -6, 0, -6.4); ctx.fillStyle = '#c8843a'; } // crescent
       else { ctx.moveTo(0, -9.8); ctx.lineTo(2.6, -10.2); ctx.quadraticCurveTo(5, -10.6, 5.4, -11.4); ctx.quadraticCurveTo(5.8, -6.4, 4.2, -3.6); ctx.quadraticCurveTo(3.4, -6.4, 0, -6.8); ctx.fillStyle = '#a8b0b8'; } // bearded
-      ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.55; ctx.stroke();
+      ctx.closePath(); ctx.fill(); ol(ctx, 0.55);
       if (era === 'stone') { seg(ctx, -0.6, -9.2, 0.8, -7, 0.6, '#c8a878'); seg(ctx, 0.8, -9.4, -0.6, -7.2, 0.6, '#c8a878'); }
       else { ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(5, -10.6); ctx.quadraticCurveTo(5.5, -7.4, 4.3, -4.4); ctx.stroke(); }
       break;
     }
     case 'sword': case 'greatsword': case 'templar': case 'sabre': {
       if (sprite === 'sabre') { // curved cavalry sabre with a stirrup guard
-        ctx.fillStyle = '#dfe3e8'; ctx.beginPath(); ctx.moveTo(-0.8, -1.6); ctx.quadraticCurveTo(-1, -7, 1.4, -11.6); ctx.quadraticCurveTo(0.4, -6.6, 0.8, -1.6); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke();
+        ctx.fillStyle = '#dfe3e8'; ctx.beginPath(); ctx.moveTo(-0.8, -1.6); ctx.quadraticCurveTo(-1, -7, 1.4, -11.6); ctx.quadraticCurveTo(0.4, -6.6, 0.8, -1.6); ctx.closePath(); ctx.fill(); ol(ctx, 0.4);
         ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 0.35; ctx.beginPath(); ctx.moveTo(-0.3, -2.4); ctx.quadraticCurveTo(-0.5, -7, 1, -10.6); ctx.stroke();
         ctx.strokeStyle = '#c8a048'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.moveTo(-1.6, -1.4); ctx.quadraticCurveTo(1.6, -1.8, 1.4, 1.8); ctx.stroke();
         seg(ctx, 0, -1.2, 0, 1.8, 1.3, '#2a1a10'); circ(ctx, 0, 2.1, 0.6, '#c8a048');
@@ -390,7 +393,7 @@ function drawShield(ctx, k, tc, team, sx, sy, lo) {
   const sg = grad(ctx, 'shield' + base, () => { const g = ctx.createLinearGradient(-4, -5, 4, 5); g.addColorStop(0, sh(base, 1.3)); g.addColorStop(0.5, base); g.addColorStop(1, sh(base, 0.58)); return g; });
   fillAt(ctx, sx, sy, sg); ctx.strokeStyle = OL; ctx.lineWidth = 0.8; ctx.stroke();
   const rim = k === 'hide' ? '#5a3a1e' : k === 'aspis' ? '#e8c060' : k === 'heater' || k === 'kite' ? '#d8c08a' : '#b8bcc4';
-  switch (k) {
+  if (!lo) switch (k) {
     case 'hide': // stitched hide with painted team stripes
       ctx.strokeStyle = rim; ctx.lineWidth = 0.5; ctx.setLineDash([0.8, 0.8]); ctx.beginPath(); ctx.ellipse(sx, sy, 2.9, 4.1, 0.15, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
       seg(ctx, sx - 2.2, sy - 1, sx + 2.2, sy - 1.6, 0.9, tc); seg(ctx, sx - 2, sy + 1.2, sx + 2, sy + 0.6, 0.9, tc);
@@ -431,7 +434,7 @@ function drawShield(ctx, k, tc, team, sx, sy, lo) {
       ctx.strokeStyle = rim; ctx.lineWidth = 0.7; ctx.beginPath(); ctx.arc(sx, sy, 3.9, 0, TAU); ctx.stroke();
       ctx.strokeStyle = 'rgba(255,245,220,0.55)'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.arc(sx, sy, 2.6, 0, TAU); ctx.stroke();
   }
-  if (k !== 'heater' && k !== 'kite' && k !== 'hide') { circ(ctx, sx, sy, k === 'aspis' ? 0.9 : 1.2, '#e8d8a0'); circ(ctx, sx - 0.35, sy - 0.35, 0.45, '#fff'); }
+  if (k !== 'heater' && k !== 'kite' && k !== 'hide') { circ(ctx, sx, sy, k === 'aspis' ? 0.9 : 1.2, '#e8d8a0'); if (!lo) circ(ctx, sx - 0.35, sy - 0.35, 0.45, '#fff'); }
   if (!lo) { // metal / varnish sheen along the upper-left edge
     ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 0.5; ctx.beginPath();
     if (k === 'heater' || k === 'kite' || k === 'scutum') { ctx.moveTo(sx - 2.8, sy - 3.6); ctx.lineTo(sx + 1.6, sy - 3.8); } else ctx.ellipse(sx, sy, k === 'aspis' ? 4.6 : 3.4, k === 'oval' ? 5.1 : k === 'aspis' ? 4.6 : 3.9, 0, Math.PI * 1.1, Math.PI * 1.55);
@@ -444,7 +447,7 @@ function quiver(ctx, x, y, kind) {
   if (kind === 'crossbow') { ctx.fillStyle = '#5a3a1e'; ctx.fillRect(-1.6, -3, 3.2, 7); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.strokeRect(-1.6, -3, 3.2, 7); ctx.fillStyle = '#ccc'; for (let i = 0; i < 3; i++) ctx.fillRect(-1.2 + i * 1.1, -4.2, 0.6, 1.4); }
   else {
     ctx.fillStyle = '#6a4224'; ctx.beginPath(); ctx.moveTo(-1.8, -4); ctx.lineTo(1.8, -4); ctx.lineTo(1.4, 5); ctx.lineTo(-1.4, 5); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+    ol(ctx, 0.5);
     ctx.fillStyle = 'rgba(255,230,190,0.18)'; ctx.fillRect(-1.6, -3.6, 1, 8);
     ctx.fillStyle = '#a07040'; ctx.fillRect(-1.8, -3, 3.6, 0.8); ctx.fillRect(-1.6, 2.6, 3.2, 0.7);
     ctx.strokeStyle = '#d8c8a0'; ctx.lineWidth = 0.5; ctx.beginPath(); for (let i = 0; i < 4; i++) { const fx = -1.3 + i * 0.85; ctx.moveTo(fx, -4); ctx.lineTo(fx, -6); } ctx.stroke();
@@ -456,7 +459,7 @@ function quiver(ctx, x, y, kind) {
 function pavise(ctx, x, y, tc) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(-0.2); ctx.scale(0.85, 0.85);
   ctx.beginPath(); ctx.moveTo(-2.6, -6); ctx.quadraticCurveTo(0, -7, 2.6, -6); ctx.lineTo(2.4, 6); ctx.lineTo(-2.4, 6); ctx.closePath();
-  ctx.fillStyle = sh(tc, 0.85); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.6; ctx.stroke();
+  ctx.fillStyle = sh(tc, 0.85); ctx.fill(); ol(ctx, 0.6);
   ctx.fillStyle = '#f0e8d4'; ctx.fillRect(-0.7, -6.2, 1.4, 12.2);
   ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(-2.3, -5.6, 1, 11);
   ctx.restore();
@@ -478,7 +481,7 @@ function load(ctx, res, by, era, back) {
         for (let i = 0; i < 3; i++) {
           const yy = by - 0.6 - i * 1.9 + (i === 2 ? 0.6 : 0), x0 = -9 + (i % 2) * 1.2, x1 = 4.5 - (i === 2 ? 2 : 0);
           ctx.fillStyle = i === 1 ? '#7a5030' : '#8a5a34'; ctx.beginPath(); ctx.moveTo(x0, yy - 1); ctx.lineTo(x1, yy - 1.2); ctx.lineTo(x1, yy + 0.9); ctx.lineTo(x0, yy + 1); ctx.closePath(); ctx.fill();
-          ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+          ol(ctx, 0.5);
           seg(ctx, x0 + 2, yy - 0.3, x1 - 3, yy - 0.5, 0.35, 'rgba(40,20,8,0.6)');
           ell(ctx, x0, yy, 0.8, 1.05, 0, '#d8b080'); ctx.strokeStyle = '#8a6030'; ctx.lineWidth = 0.35; ctx.beginPath(); ctx.ellipse(x0, yy, 0.45, 0.6, 0, 0, TAU); ctx.stroke();
         }
@@ -493,7 +496,7 @@ function load(ctx, res, by, era, back) {
       }
       case 3: { // sack of ore with nuggets
         ctx.fillStyle = '#b89a66'; ctx.beginPath(); ctx.moveTo(-6.5, by - 0.5); ctx.quadraticCurveTo(-9.6, by + 3, -7.8, by + 7); ctx.lineTo(-2.6, by + 7); ctx.quadraticCurveTo(-1.4, by + 3, -3.6, by - 0.5); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ol(ctx, 0.5);
         ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.moveTo(-3.6, by + 1); ctx.quadraticCurveTo(-1.8, by + 4, -2.6, by + 7); ctx.lineTo(-4, by + 7); ctx.closePath(); ctx.fill();
         circ(ctx, -5.6, by - 0.7, 1.1, '#ffd84a'); circ(ctx, -4.3, by - 1.2, 0.9, '#f2c230'); circ(ctx, -4.8, by - 1.6, 0.35, '#fff6c0');
         seg(ctx, -6.6, by + 0.4, -3.4, by + 0.4, 0.6, '#6a4a24');
@@ -508,7 +511,7 @@ function load(ctx, res, by, era, back) {
     }
   } else if (!fut) { // empty: small bedroll / satchel
     ctx.fillStyle = era === 'stone' ? '#8a6a44' : '#a08a5a'; ctx.beginPath(); ctx.ellipse(-4.4, by + 4.2, 1.8, 2.6, 0.2, 0, TAU); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke();
+    ol(ctx, 0.4);
   }
 }
 
@@ -521,7 +524,7 @@ function tool(ctx, res, state, era, busy, act) {
   const haft = fut ? '#4a5260' : '#6a4424';
   if (state === 5) { // mallet / hammer
     seg(ctx, 0, 1.9, 0, -7.2, 1.9, OL); seg(ctx, 0, 1.7, 0, -7, 1.2, haft);
-    if (era === 'stone') { ctx.fillStyle = '#8a8680'; ctx.beginPath(); ctx.ellipse(0, -8.2, 2.9, 1.8, 0.1, 0, TAU); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke(); seg(ctx, -1, -7.2, 1, -7.4, 0.6, '#c8a878'); }
+    if (era === 'stone') { ctx.fillStyle = '#8a8680'; ctx.beginPath(); ctx.ellipse(0, -8.2, 2.9, 1.8, 0.1, 0, TAU); ctx.fill(); ol(ctx, 0.5); seg(ctx, -1, -7.2, 1, -7.4, 0.6, '#c8a878'); }
     else if (era === 'bronze' || era === 'iron' || era === 'classical' || era === 'medieval') { ctx.fillStyle = '#8a6040'; ctx.fillRect(-2.9, -9.6, 5.8, 2.9); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.strokeRect(-2.9, -9.6, 5.8, 2.9); ctx.fillStyle = 'rgba(255,230,190,0.3)'; ctx.fillRect(-2.9, -9.6, 5.8, 0.7); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(-2.9, -7.4, 5.8, 0.7); }
     else {
       ctx.fillStyle = fut ? '#d8e0e8' : '#5a5a5e'; ctx.fillRect(-1.2, -9.2, 4, 2.2); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.strokeRect(-1.2, -9.2, 4, 2.2);
@@ -533,16 +536,16 @@ function tool(ctx, res, state, era, busy, act) {
   } else if (res === 0) { // sickle
     seg(ctx, 0, 1.6, 0, -3.6, 1.8, OL); seg(ctx, 0, 1.5, 0, -3.5, 1.2, haft);
     ctx.fillStyle = metal; ctx.beginPath(); ctx.arc(2.2, -4.4, 2.9, Math.PI * 0.98, Math.PI * 1.98); ctx.arc(2.7, -4.1, 2.1, Math.PI * 1.9, Math.PI * 1.02, true); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.35; ctx.stroke(); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 0.35; ctx.beginPath(); ctx.arc(2.2, -4.4, 2.6, Math.PI * 1.15, Math.PI * 1.6); ctx.stroke();
+    ol(ctx, 0.35); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 0.35; ctx.beginPath(); ctx.arc(2.2, -4.4, 2.6, Math.PI * 1.15, Math.PI * 1.6); ctx.stroke();
   } else if (res === 2 || res === 3 || res === 4) { // pickaxe
     seg(ctx, 0, 1.9, 0, -8, 1.9, OL); seg(ctx, 0, 1.7, 0, -7.8, 1.2, haft);
     ctx.fillStyle = metal; ctx.beginPath(); ctx.moveTo(-4.4, -5.6); ctx.quadraticCurveTo(-2, -8.6, 0, -8.8); ctx.quadraticCurveTo(2, -8.6, 4.4, -5.6); ctx.quadraticCurveTo(2, -7.4, 0, -7.4); ctx.quadraticCurveTo(-2, -7.4, -4.4, -5.6); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke(); sheen(ctx, -2.4, -7.8, 1.4, -8.4, 0.35, 0.65);
+    ol(ctx, 0.4); sheen(ctx, -2.4, -7.8, 1.4, -8.4, 0.35, 0.65);
     if (fut && res === 4) glow(ctx, 4.2, -5.8, 2.4, '120,230,255', 0.7);
   } else { // felling axe
     seg(ctx, 0, 1.9, 0, -8.6, 1.9, OL); seg(ctx, 0, 1.7, 0, -8.5, 1.2, haft);
     ctx.fillStyle = metal; ctx.beginPath(); ctx.moveTo(0, -8.8); ctx.lineTo(3.8, -9.9); ctx.quadraticCurveTo(4.6, -7.6, 3.8, -5.5); ctx.lineTo(0, -6.6); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke();
+    ol(ctx, 0.45);
     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 0.45; ctx.beginPath(); ctx.moveTo(4, -9.4); ctx.quadraticCurveTo(4.5, -7.6, 3.9, -6); ctx.stroke();
   }
 }
@@ -551,7 +554,7 @@ function tool(ctx, res, state, era, busy, act) {
 // the target (+x); returns the muzzle distance
 function firearm(ctx, sprite, uid, era, busy, act, t, lo, mounted) {
   const W = '#6a3a1a', ST = '#3c3e42';
-  const outline = () => { ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke(); };
+  const outline = () => { ol(ctx, 0.45); };
   switch (sprite) {
     case 'crossbow': {
       seg(ctx, -3, 0.3, 8.6, 0, 2.4, OL); seg(ctx, -3, 0.3, 8.6, 0, 1.6, '#7a4e28');
@@ -664,7 +667,7 @@ function hair(ctx, Lk, hx, hy) {
     case 3: circ(ctx, hx - 3.3, hy - 2, 1.4, Lk.hair); break; // bun
     case 4: for (let i = 0; i < 4; i++) circ(ctx, hx - 3 + i * 1.6, hy - 3 + Math.abs(i - 1.5) * 0.5, 1.1, Lk.hair); break; // curls
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fillRect(hx - 2.2, hy - 3.3, 1.6, 0.5);
+  if (!LO) { ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.fillRect(hx - 2.2, hy - 3.3, 1.6, 0.5); }
 }
 
 // o: {team, era, sprite, dir, walk, act, busy, carry, cls, id, noShadow, legs,
@@ -679,6 +682,7 @@ export function drawHuman(ctx, x, y, o) {
   const id = o.id || 0, lo = !!o.lod, uid = o.uid || '', tt = o.t || 0;
   const Lk = looks(id), skin = Lk.skin;
   const mounted = o.legs === false;
+  LO = lo;
   ctx.save(); ctx.translate(x, y); ctx.scale(dir, 1);
   if (!o.noShadow) contactShadow(ctx, 0.5, 0, 6.5, 2.7, 0.34);
   const big = sprite === 'exo' || sprite === 'marine' || sprite === 'templar' ? 1.2 : 1;
@@ -714,9 +718,7 @@ export function drawHuman(ctx, x, y, o) {
       const kx = (hx + fx) / 2 + 0.9 + lift * 0.5 + crouch * 0.6, ky = -3.8 - lift * 0.6 + crouch * 0.4;
       const col = i ? legCol : sh(legCol, 0.76);
       limb(ctx, [hx + lean * 0.3 + sway, -7.2 - bob * 0.5 + crouch], [kx, ky], [fx, fy], 2.1, col);
-      ctx.strokeStyle = OL; ctx.lineWidth = 3.1; ctx.beginPath(); ctx.moveTo(fx - 0.4, fy - 1.4); ctx.lineTo(fx + 1.3, fy - 0.1); ctx.stroke();
-      ctx.strokeStyle = i ? boot : sh(boot, 0.8); ctx.lineWidth = 2.3; ctx.stroke();
-      if (!lo && i) seg(ctx, fx - 0.2, fy - 1.6, fx + 0.5, fy - 1, 0.4, 'rgba(255,255,255,0.22)');
+      ctx.strokeStyle = i ? boot : sh(boot, 0.8); ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(fx - 0.4, fy - 1.4); ctx.lineTo(fx + 1.3, fy - 0.1); ctx.stroke();
       if (era === 'classical' || era === 'bronze') { seg(ctx, kx - 0.6, ky + 0.6, fx - 0.2, fy - 1.6, 1.4, i ? '#c8a048' : '#a8843a'); if (i && !lo) seg(ctx, kx - 0.9, ky + 1, fx - 0.6, fy - 2, 0.35, 'rgba(255,240,190,0.7)'); }
       else if (!worker && era === 'medieval' && (sprite === 'greatsword' || sprite === 'sword')) seg(ctx, kx - 0.3, ky + 0.4, fx - 0.2, fy - 1.6, 1.2, i ? '#9aa0a8' : '#7a8088');
       else if (era === 'industrial' && !worker) seg(ctx, kx - 0.2, ky + 0.8, fx - 0.3, fy - 1.4, 1.6, i ? '#6a6450' : '#565040'); // puttees
@@ -732,11 +734,11 @@ export function drawHuman(ctx, x, y, o) {
     const cc = era === 'classical' ? '#a8261c' : sh(tc, 0.7);
     const cb = mounted ? -8.2 : -3.2 + crouch;
     ctx.fillStyle = cc; ctx.beginPath(); ctx.moveTo(-2.8, sY - 1); ctx.quadraticCurveTo(-5 - fl, sY + 5, -5.5 - fl * 1.6, cb); ctx.lineTo(-1.2 - fl * 0.6, cb - 1.2); ctx.lineTo(1, sY + 2); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 0.6; ctx.stroke();
+    ol(ctx, 0.6);
     if (!lo) { seg(ctx, -3.6, sY + 2, -4.4 - fl, cb - 1.2, 0.5, 'rgba(0,0,0,0.25)'); seg(ctx, -2.6, sY + 3, -2.8 - fl * 0.5, cb - 1.6, 0.4, 'rgba(255,255,255,0.12)'); }
   }
   const blade = sprite === 'sword' || sprite === 'greatsword' || sprite === 'sabre';
-  if (blade && !worker) { // scabbard at the hip
+  if (blade && !worker && !lo) { // scabbard at the hip
     const sy0 = mounted ? by - 1.4 : by - 1, len = sprite === 'greatsword' ? 9 : 6.6;
     seg(ctx, -1, sy0, -1 - len * 0.6, sy0 + len * 0.8, 1.9, OL); seg(ctx, -1, sy0, -1 - len * 0.6, sy0 + len * 0.8, 1.2, sprite === 'sabre' ? '#2a2a2e' : '#5a3a1e');
     circ(ctx, -1 - len * 0.6, sy0 + len * 0.8, 0.7, '#c8a048'); seg(ctx, -1.4, sy0 + 0.6, -1.9, sy0 + 1.3, 1.4, '#c8a048');
@@ -852,7 +854,6 @@ export function drawHuman(ctx, x, y, o) {
   if (cloth && !lo && !fut) { // cloth folds
     ctx.strokeStyle = 'rgba(0,0,0,0.22)'; ctx.lineWidth = 0.45; ctx.beginPath();
     ctx.moveTo(-1.8, by - 2.2); ctx.quadraticCurveTo(-1.2, by - 4, -1.6, by - 5.4); ctx.moveTo(1.4, by - 2); ctx.quadraticCurveTo(2.1, by - 3.6, 1.6, by - 5); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.moveTo(-2.6, bodyY + 1.4); ctx.quadraticCurveTo(-3.2, bodyY + 4, -2.8, by - 2); ctx.stroke();
   }
   ctx.restore();
   // below the waist: tunic hems, pteruges, mail skirts, coat tails, aprons
@@ -861,9 +862,8 @@ export function drawHuman(ctx, x, y, o) {
     if (worker && !fut && era !== 'modern' && era !== 'industrial') {
       const hc = sh(body, 0.86);
       ctx.fillStyle = hc; ctx.beginPath(); ctx.moveTo(-3.8, by - 0.6); ctx.lineTo(3.8, by - 0.6); ctx.lineTo(4.2 + sk, by + 2.8); ctx.quadraticCurveTo(0, by + 3.4, -4.2 + sk, by + 2.8); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = OL; ctx.lineWidth = 0.55; ctx.stroke();
-      if (!lo) { ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.4; ctx.beginPath(); ctx.moveTo(-1.2, by); ctx.lineTo(-1.4 + sk, by + 3); ctx.moveTo(1.6, by); ctx.lineTo(1.8 + sk, by + 2.9); ctx.stroke(); }
-      if (Lk.garb === 0 && era !== 'stone' && era !== 'bronze') { ctx.fillStyle = '#7a5434'; ctx.beginPath(); ctx.moveTo(0.4, by - 0.8); ctx.lineTo(4.4, by - 0.8); ctx.lineTo(4.8 + sk, by + 3.8); ctx.lineTo(1 + sk, by + 4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.45; ctx.stroke(); }
+      if (!lo) { ol(ctx, 0.55); ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.4; ctx.beginPath(); ctx.moveTo(-1.2, by); ctx.lineTo(-1.4 + sk, by + 3); ctx.moveTo(1.6, by); ctx.lineTo(1.8 + sk, by + 2.9); ctx.stroke(); }
+      if (Lk.garb === 0 && era !== 'stone' && era !== 'bronze') { ctx.fillStyle = '#7a5434'; ctx.beginPath(); ctx.moveTo(0.4, by - 0.8); ctx.lineTo(4.4, by - 0.8); ctx.lineTo(4.8 + sk, by + 3.8); ctx.lineTo(1 + sk, by + 4); ctx.closePath(); ctx.fill(); ol(ctx, 0.45); }
     } else if (!worker && (era === 'classical' || era === 'bronze' || era === 'iron')) {
       for (let i = 0; i < 5; i++) { const px = -3.6 + i * 1.7; ctx.fillStyle = i % 2 ? sh(tc, 0.8) : '#d8c8a0'; ctx.fillRect(px + sk * 0.3, by - 0.2, 1.5, 3); }
       ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 0.35; ctx.beginPath(); ctx.moveTo(-3.6, by + 2.8); ctx.lineTo(4.9, by + 2.8); ctx.stroke();
@@ -876,9 +876,9 @@ export function drawHuman(ctx, x, y, o) {
     }
   }
   // belt pouch
-  if (!fut && !lo && cls !== 'crew' && (worker ? era !== 'stone' && era !== 'modern' : era !== 'stone')) { ctx.fillStyle = worker ? '#6a4a2a' : '#4a3420'; ctx.fillRect(2.4, by - 1.8, 1.8, 2.2); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(2.4, by - 1.8, 1.8, 0.6); }
+  if (!fut && !lo && cls !== 'crew' && (worker ? era !== 'stone' && era !== 'modern' : era !== 'stone')) { ctx.fillStyle = worker ? '#6a4a2a' : '#4a3420'; ctx.fillRect(2.4, by - 1.8, 1.8, 2.2); }
   // pauldrons
-  if (!lo && !worker && (era === 'medieval' || fut || sprite === 'greatsword' || sprite === 'sabre' || uid === 'arquebusier')) { ell(ctx, 2.6, sY + 0.2, 2, 1.5, 0.3, sh(fut ? body : '#a0a6ae', 1.1)); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke(); sheen(ctx, 1.8, sY - 0.6, 3.2, sY - 0.4, 0.4, 0.6); }
+  if (!lo && !worker && (era === 'medieval' || fut || sprite === 'greatsword' || sprite === 'sabre' || uid === 'arquebusier')) { ell(ctx, 2.6, sY + 0.2, 2, 1.5, 0.3, sh(fut ? body : '#a0a6ae', 1.1)); ol(ctx, 0.5); sheen(ctx, 1.8, sY - 0.6, 3.2, sY - 0.4, 0.4, 0.6); }
   // shield (team coloured) on the back arm
   const shk = shieldKind(sprite, era, cls);
   if (shk) drawShield(ctx, shk, tc, team | 0, -3.6, bodyY + 6.2, lo);
@@ -886,16 +886,15 @@ export function drawHuman(ctx, x, y, o) {
   const hx = 0.5 + lean * 0.4, hy = bodyY - 3.6;
   const helmeted = fut && !worker;
   if (!helmeted) {
-    ctx.fillStyle = sh(skin, 0.8); ctx.fillRect(hx - 1.1, hy + 2, 2.2, 1.9);
     ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(hx, hy, 3, 0, TAU); ctx.fill();
     ctx.strokeStyle = OL; ctx.lineWidth = 0.7; ctx.stroke();
     if (!lo) { ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.beginPath(); ctx.arc(hx + 0.9, hy + 0.3, 2.4, -0.9, 1.6); ctx.fill(); ell(ctx, hx - 0.6, hy + 0.3, 0.7, 1, 0, sh(skin, 0.82)); }
     if (lookAt) { ctx.fillStyle = '#1a120c'; ctx.fillRect(hx - 0.3, hy - 0.7, 0.8, 0.8); ctx.fillRect(hx + 1.5, hy - 0.7, 0.8, 0.8); }
     else {
       ctx.fillStyle = '#1a120c'; ctx.fillRect(hx + 1.4, hy - 0.7, 0.9, 0.9);
-      if (!lo) { ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fillRect(hx + 2.3, hy - 0.7, 0.4, 0.5); ctx.fillStyle = sh(skin, 0.8); ctx.fillRect(hx + 2.6, hy - 0.1, 0.8, 1); }
+      if (!lo) { ctx.fillStyle = sh(skin, 0.8); ctx.fillRect(hx + 2.6, hy - 0.1, 0.8, 1); }
     }
-    if (!lo) { seg(ctx, hx + 0.9, hy - 1.6, hx + 2.5, hy - 1.75, 0.45, sh(Lk.hair, 0.8)); seg(ctx, hx + 1.5, hy + 1.35, hx + 2.3, hy + 1.25, 0.35, 'rgba(110,50,40,0.75)'); }
+    if (!lo) { seg(ctx, hx + 0.9, hy - 1.6, hx + 2.5, hy - 1.75, 0.45, sh(Lk.hair, 0.8)); }
     const beardOk = Lk.style !== 3 && Lk.style !== 1 && !(worker && Lk.hat === 0 && (era === 'bronze' || era === 'medieval'));
     if (!lo && beardOk && Lk.beard && (era !== 'modern' || worker) && sprite !== 'greatsword') {
       if (Lk.beard === 1) { ctx.fillStyle = 'rgba(40,28,18,0.28)'; ctx.beginPath(); ctx.arc(hx + 0.6, hy + 0.6, 2.6, 0.05, 2.5); ctx.fill(); }
@@ -910,7 +909,7 @@ export function drawHuman(ctx, x, y, o) {
   } else hair(ctx, Lk, hx, hy);
   if (cls === 'crew') { // rower: front arm only
     limb(ctx, [2.4, sY], [3.6, sY + 2.4], frontHand, 1.7, armCol); circ(ctx, frontHand[0], frontHand[1], 1, skin);
-    ctx.restore(); ctx.restore(); return;
+    ctx.restore(); ctx.restore(); LO = false; return;
   }
   // ---- front arm + weapon / tool
   if (frontAng !== null) {
@@ -930,7 +929,7 @@ export function drawHuman(ctx, x, y, o) {
     } else weapon(ctx, sprite, era, uid, busy, tt, lo);
     ctx.restore();
     limb(ctx, [0, 0], [0.9, 3], hp, 1.7, armCol);
-    if (band) seg(ctx, 0.25, 1, 0.55, 2.1, 2, tc);
+    if (band && !lo) seg(ctx, 0.25, 1, 0.55, 2.1, 2, tc);
     circ(ctx, hp[0], hp[1], 1.1, hand);
     ctx.restore();
     // swing trail at the strike
@@ -949,18 +948,17 @@ export function drawHuman(ctx, x, y, o) {
       const c = Math.cos(up), s = Math.sin(up);
       const bx = backHand[0], byy = backHand[1];
       const tail = [bx - c * L * 0.3, byy - s * L * 0.3], tip = [bx + c * L * 0.7, byy + s * L * 0.7];
-      seg(ctx, tail[0], tail[1], tip[0], tip[1], 2, OL); seg(ctx, tail[0], tail[1], tip[0], tip[1], 1.3, lance && era === 'medieval' ? sh(tc, 1.2) : '#7a5a34');
-      if (!lo) seg(ctx, tail[0] - s * 0.3, tail[1] + c * 0.3 - 0.3, tip[0] - s * 0.3, tip[1] - 0.3, 0.35, 'rgba(255,240,210,0.35)');
+      if (!lo) seg(ctx, tail[0], tail[1], tip[0], tip[1], 2, OL); seg(ctx, tail[0], tail[1], tip[0], tip[1], 1.3, lance && era === 'medieval' ? sh(tc, 1.2) : '#7a5a34');
       const head = era === 'stone' ? '#8a8680' : era === 'bronze' || era === 'classical' ? '#d0a050' : '#d4d8de';
       const hl = sprite === 'pike' ? 6.5 : lance ? 4.5 : era === 'stone' ? 4.6 : 5.2, hw = sprite === 'pike' ? 1 : era === 'stone' ? 1.8 : 1.6;
       ctx.fillStyle = head; ctx.beginPath(); ctx.moveTo(tip[0] - s * hw, tip[1] + c * hw); ctx.quadraticCurveTo(tip[0] + c * hl * 0.45 - s * hw * 1.1, tip[1] + s * hl * 0.45 + c * hw * 1.1, tip[0] + c * hl, tip[1] + s * hl); ctx.quadraticCurveTo(tip[0] + c * hl * 0.45 + s * hw * 1.1, tip[1] + s * hl * 0.45 - c * hw * 1.1, tip[0] + s * hw, tip[1] - c * hw); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke();
+      ol(ctx, 0.4);
       if (era !== 'stone') sheen(ctx, tip[0] + c * 0.6, tip[1] + s * 0.6 - 0.3, tip[0] + c * hl * 0.8, tip[1] + s * hl * 0.8 - 0.2, 0.35, 0.7);
       else { seg(ctx, tip[0] - c * 1.4 - s, tip[1] - s * 1.4 + c, tip[0] - c * 0.2 + s, tip[1] - s * 0.2 - c, 0.6, '#c8a878'); }
       if (sprite === 'hoplite') { ctx.fillStyle = '#c8a048'; ctx.beginPath(); ctx.moveTo(tail[0] - s * 0.8, tail[1] + c * 0.8); ctx.lineTo(tail[0] - c * 3, tail[1] - s * 3); ctx.lineTo(tail[0] + s * 0.8, tail[1] - c * 0.8); ctx.fill(); } // sauroter
       if (sprite === 'pike') { seg(ctx, tip[0] - c * 0.5 - s * 1.3, tip[1] - s * 0.5 + c * 1.3, tip[0] - c * 0.5 + s * 1.3, tip[1] - s * 0.5 - c * 1.3, 0.7, '#333'); ctx.fillStyle = tc; ctx.beginPath(); ctx.arc(tip[0] - c * 1.6, tip[1] - s * 1.6 + 0.8, 0.9, 0, TAU); ctx.fill(); }
       if (lance) {
-        if (era === 'medieval') { const vx = bx + c * 3.6, vy = byy + s * 3.6; ctx.fillStyle = '#a8aeb6'; ctx.beginPath(); ctx.moveTo(vx - s * 2.2, vy + c * 2.2); ctx.lineTo(vx + c * 3, vy + s * 3); ctx.lineTo(vx + s * 2.2, vy - c * 2.2); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.4; ctx.stroke(); } // vamplate
+        if (era === 'medieval') { const vx = bx + c * 3.6, vy = byy + s * 3.6; ctx.fillStyle = '#a8aeb6'; ctx.beginPath(); ctx.moveTo(vx - s * 2.2, vy + c * 2.2); ctx.lineTo(vx + c * 3, vy + s * 3); ctx.lineTo(vx + s * 2.2, vy - c * 2.2); ctx.closePath(); ctx.fill(); ol(ctx, 0.4); } // vamplate
         if (era !== 'classical') { // swallow-tail pennon behind the tip
           const px = tip[0] - c * 2.4, py = tip[1] - s * 2.4, fl = Math.sin(tt * 7 + id) * 0.8 + (moving ? 1 : 0);
           ctx.fillStyle = tc; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - c * 5.5 + s * 0.2, py - s * 5.5 - 2.4 + fl * 0.3); ctx.lineTo(px - c * 4 - s * 0.2, py - s * 4 - 1.3 + fl * 0.5); ctx.lineTo(px - c * 5.5, py - s * 5.5 - 0.4 + fl * 0.6); ctx.lineTo(px - c * 0.2, py - s * 0.2 - 2.2 * 0 + 0.1); ctx.closePath(); ctx.fill();
@@ -1006,11 +1004,12 @@ export function drawHuman(ctx, x, y, o) {
     const [fx, fy] = frontHand;
     const ex = (2.4 + fx) / 2 + 0.2, ey = (sY + fy) / 2 + 1.4;
     limb(ctx, [2.4, sY], [ex, ey], [fx, fy], 1.7, armCol);
-    if (band) seg(ctx, 2.4 + (ex - 2.4) * 0.45, sY + (ey - sY) * 0.45 - 0.3, 2.4 + (ex - 2.4) * 0.8, sY + (ey - sY) * 0.8 - 0.3, 2, tc);
+    if (band && !lo) seg(ctx, 2.4 + (ex - 2.4) * 0.45, sY + (ey - sY) * 0.45 - 0.3, 2.4 + (ex - 2.4) * 0.8, sY + (ey - sY) * 0.8 - 0.3, 2, tc);
     circ(ctx, fx, fy, 1.1, hand);
   }
   ctx.restore();
   ctx.restore();
+  LO = false;
 }
 
 // ------------------------------------------------------------- animals
@@ -1231,6 +1230,14 @@ function barrel(ctx, ang, len, z, ox, oy, col, width = 2.5) {
   ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = width * 0.35; ctx.beginPath(); ctx.moveTo(a[0], a[1] - width * 0.25); ctx.lineTo(b[0], b[1] - width * 0.25); ctx.stroke();
   return b;
 }
+// reinforcing bands across a barrel drawn with barrel() (fractions along it)
+function bands(ctx, ang, len, z, ox, oy, width, fr, col) {
+  const a = P(ox, oy, z), b = P(ox + Math.cos(ang) * len, oy + Math.sin(ang) * len, z);
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * width * 0.62, ny = dx / l * width * 0.62;
+  ctx.lineCap = 'butt'; ctx.strokeStyle = col; ctx.lineWidth = Math.max(0.8, width * 0.3); ctx.beginPath();
+  for (const f of fr) { const x = a[0] + dx * f, y = a[1] + dy * f; ctx.moveTo(x - nx, y - ny); ctx.lineTo(x + nx, y + ny); }
+  ctx.stroke(); ctx.lineCap = 'round';
+}
 function wheel(ctx, ang, a, b, z, r, col = '#4a3018', spokes = 6, rot = 0) {
   // spoked wheel on the side of a vehicle; ellipse projected along the facing
   const c = Math.cos(ang), s = Math.sin(ang);
@@ -1281,6 +1288,7 @@ function tank(ctx, o, sprite, era, ang, tc) {
     const tl = 0.42;
     hullShape(ctx, ang, tl, 0.38, 0.3 + zb, 0.46 + zb, sh(hull, 1.1), 0.08, tx, ty);
     const tip = barrel(ctx, ang, 0.66 - recoil, 0.4 + zb, tx + c * (0.18 - recoil), ty + s * (0.18 - recoil), hover ? '#9ab' : '#2e3228', hover ? 2.2 : 2.8);
+    bands(ctx, ang, 0.66 - recoil, 0.4 + zb, tx + c * (0.18 - recoil), ty + s * (0.18 - recoil), hover ? 2.2 : 3.4, hover ? [0.3, 0.5, 0.7] : [0.5], hover ? '#5ae8ff' : '#3a3e34'); // fume extractor / coils
     // muzzle brake, hatch, antenna
     ctx.fillStyle = hover ? '#7cf1ff' : '#222'; ctx.beginPath(); ctx.arc(tip[0], tip[1], hover ? 1.6 : 1.7, 0, TAU); ctx.fill();
     const hp = P(tx - c * 0.08 + s * 0.08, ty - s * 0.08 - c * 0.08, 0.47 + zb); ell(ctx, hp[0], hp[1], 2.2, 1.2, 0, sh(hull, 0.75)); ell(ctx, hp[0], hp[1] - 0.4, 1.6, 0.8, 0, sh(hull, 1.25));
@@ -1316,7 +1324,10 @@ function truck(ctx, o, sprite, era, ang, tc) {
     vbox(ctx, ang, 0.7, 0.44, 0.22, 0.32, hull, -c * 0.05, -s * 0.05);
     vbox(ctx, ang, 0.3, 0.3, 0.32, 0.46, sh(hull, 1.1), -c * 0.1, -s * 0.1);
     const recoil = busy && act < 0.2 ? (1 - act / 0.2) * 0.12 : 0;
-    const tip = barrel(ctx, ang, 0.85 - recoil, 0.46 + (busy ? 0.08 : 0), -c * 0.05, -s * 0.05, '#2e3228', 3);
+    const bz = 0.46 + (busy ? 0.08 : 0);
+    const tip = barrel(ctx, ang, 0.85 - recoil, bz, -c * 0.05, -s * 0.05, '#2e3228', 3);
+    bands(ctx, ang, 0.85 - recoil, bz, -c * 0.05, -s * 0.05, 3, [0.18, 0.3], '#4a5040'); // recoil cylinders
+    ctx.fillStyle = '#1e221a'; ctx.beginPath(); ctx.arc(tip[0], tip[1], 2.1, 0, TAU); ctx.fill(); ctx.fillStyle = '#5a6050'; ctx.fillRect(tip[0] - 2.2, tip[1] - 0.6, 4.4, 1.2); // muzzle brake
     if (busy && act < 0.1) { const g = ctx.createRadialGradient(tip[0], tip[1], 0, tip[0], tip[1], 10); g.addColorStop(0, 'rgba(255,255,220,0.95)'); g.addColorStop(1, 'rgba(255,150,60,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(tip[0], tip[1], 10, 0, TAU); ctx.fill(); }
   }
   for (const [a, b] of wheels) { const nx = -s * Math.sign(b), ny = c * Math.sign(b); if (nx + ny > 0) tyre(ctx, ang, a, b, rot); }
@@ -1416,7 +1427,12 @@ function siege(ctx, o, sprite, era, ang, tc) {
     const recoil = busy && act < 0.2 ? (1 - act / 0.2) * 0.1 : 0;
     const bc = era === 'gunpowder' ? '#3a3a3a' : '#2e3a2a';
     const tip = barrel(ctx, ang, 0.66 - recoil, 0.26, -c * (0.2 + recoil), -s * (0.2 + recoil), bc, 4.2);
-    if (era === 'gunpowder') { const mid = P(c * 0.05, s * 0.05, 0.26); ctx.fillStyle = '#c8a048'; ctx.beginPath(); ctx.arc(mid[0], mid[1], 1, 0, TAU); ctx.fill(); }
+    if (era === 'gunpowder') { // reinforcing rings, trunnion, cascabel and muzzle swell
+      bands(ctx, ang, 0.66 - recoil, 0.26, -c * (0.2 + recoil), -s * (0.2 + recoil), 4.2, [0.08, 0.3, 0.55, 0.94], '#5a5a5e');
+      const br = P(-c * (0.23 + recoil), -s * (0.23 + recoil), 0.26); circ(ctx, br[0], br[1], 1.5, '#3a3a3a'); circ(ctx, br[0] - 0.4, br[1] - 0.4, 0.5, 'rgba(255,255,255,0.4)');
+      const mid = P(c * 0.05, s * 0.05, 0.26); ctx.fillStyle = '#c8a048'; ctx.beginPath(); ctx.arc(mid[0], mid[1], 1.2, 0, TAU); ctx.fill();
+    } else bands(ctx, ang, 0.66 - recoil, 0.26, -c * (0.2 + recoil), -s * (0.2 + recoil), 4.2, [0.12, 0.2, 0.96], '#4a5640');
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(tip[0], tip[1], 1.5, 0, TAU); ctx.fill(); // bore
     if (era !== 'gunpowder') { vbox(ctx, ang, 0.06, 0.42, 0.18, 0.36, '#4a5236', c * 0.08, s * 0.08); } // gun shield
     if (busy && act < 0.1) { const g = ctx.createRadialGradient(tip[0], tip[1], 0, tip[0], tip[1], 10); g.addColorStop(0, 'rgba(255,255,220,0.95)'); g.addColorStop(0.4, 'rgba(255,180,80,0.8)'); g.addColorStop(1, 'rgba(255,150,60,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(tip[0], tip[1], 10, 0, TAU); ctx.fill(); }
   } else {
@@ -1451,14 +1467,25 @@ function siege(ctx, o, sprite, era, ang, tc) {
       ctx.strokeStyle = '#8a6030'; ctx.lineWidth = 2.2; ctx.stroke();
       if (sprite === 'trebuchet') {
         const cw = R(Math.cos(armA) * 0.35, 0, tall - Math.sin(armA) * 0.35);
-        ctx.fillStyle = '#4a3a2a'; ctx.fillRect(cw[0] - 3.5, cw[1], 7, 6); ctx.strokeStyle = OL; ctx.lineWidth = 0.6; ctx.strokeRect(cw[0] - 3.5, cw[1], 7, 6);
         seg(ctx, ax[0], ax[1], cw[0], cw[1], 1.8, '#8a6030');
-        if (sw < 0.95) { ctx.strokeStyle = 'rgba(220,210,180,0.8)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.lineTo(tip[0] + 2, tip[1] + 6); ctx.stroke(); circ(ctx, tip[0] + 2, tip[1] + 6.5, 1.8, '#8a8680'); }
+        // counterweight box with iron straps, hanging from a pivot
+        ctx.fillStyle = '#4a3a2a'; ctx.beginPath(); ctx.moveTo(cw[0] - 3.6, cw[1]); ctx.lineTo(cw[0] + 3.6, cw[1]); ctx.lineTo(cw[0] + 3, cw[1] + 6.4); ctx.lineTo(cw[0] - 3, cw[1] + 6.4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.6; ctx.stroke();
+        ctx.fillStyle = '#6a6a6e'; ctx.fillRect(cw[0] - 3.5, cw[1] + 1.6, 6.9, 0.8); ctx.fillRect(cw[0] - 3.2, cw[1] + 4.4, 6.3, 0.8);
+        ctx.fillStyle = 'rgba(255,230,190,0.18)'; ctx.fillRect(cw[0] - 3.2, cw[1] + 0.3, 1.4, 5.8);
+        // sling: rope and pouch trailing from the tip (whips over when released)
+        const rel = sw >= 0.95, sx = tip[0] + (rel ? -3 : 2), sy = tip[1] + (rel ? -6 : 6.4);
+        ctx.strokeStyle = 'rgba(220,210,180,0.85)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.quadraticCurveTo(tip[0] + (rel ? 1 : 2.4), tip[1] + (rel ? -2 : 3), sx, sy); ctx.stroke();
+        ctx.fillStyle = '#7a5a3a'; ctx.beginPath(); ctx.ellipse(sx, sy + 0.4, 1.6, 1, 0, 0, TAU); ctx.fill();
+        if (!rel) { circ(ctx, sx, sy - 0.2, 1.7, '#8a8680'); circ(ctx, sx - 0.5, sy - 0.7, 0.6, '#c8c4bc'); }
       } else {
-        ctx.fillStyle = '#5a3a1a'; ctx.beginPath(); ctx.ellipse(tip[0], tip[1], 2.8, 1.6, 0, 0, TAU); ctx.fill();
-        if (sw < 0.95) circ(ctx, tip[0], tip[1] - 1, 1.8, '#8a8680');
-        // torsion skein
+        // bucket with a rim, stone loaded until the throw
+        ctx.fillStyle = '#5a3a1a'; ctx.beginPath(); ctx.ellipse(tip[0], tip[1], 3, 1.8, 0, 0, Math.PI); ctx.lineTo(tip[0] - 3, tip[1] - 0.4); ctx.closePath(); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 0.5; ctx.stroke();
+        ctx.strokeStyle = '#8a6a44'; ctx.lineWidth = 0.6; ctx.beginPath(); ctx.ellipse(tip[0], tip[1] - 0.2, 3, 0.9, 0, 0, TAU); ctx.stroke();
+        if (sw < 0.95) { circ(ctx, tip[0], tip[1] - 1, 1.8, '#8a8680'); circ(ctx, tip[0] - 0.6, tip[1] - 1.6, 0.6, '#c8c4bc'); }
+        // torsion skein with rope wraps, and the winch rope while cocked
         const sk = R(0.15, 0, 0.22); ctx.fillStyle = '#b89a66'; ctx.beginPath(); ctx.ellipse(sk[0], sk[1], 3.4, 1.6, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = 'rgba(90,60,30,0.6)'; ctx.lineWidth = 0.4; ctx.beginPath(); for (let i = -2; i <= 2; i++) { ctx.moveTo(sk[0] + i * 1.2, sk[1] - 1.4); ctx.lineTo(sk[0] + i * 1.2 + 0.3, sk[1] + 1.4); } ctx.stroke();
+        if (sw < 0.05) { const wn = R(-0.42, 0, 0.24); ctx.strokeStyle = 'rgba(220,200,160,0.85)'; ctx.lineWidth = 0.5; ctx.beginPath(); ctx.moveTo(tip[0], tip[1]); ctx.lineTo(wn[0], wn[1]); ctx.stroke(); circ(ctx, wn[0], wn[1], 1.2, '#4a3018'); }
       }
     }
   }
