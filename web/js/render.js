@@ -7,6 +7,7 @@ import { decorateChunk } from './art/terrain.js';
 import { mountainSprite, hasMountainSprite } from './art/mountains.js';
 import { isFootUnit } from './art/units.js';
 import { puffSprite, glowSprite, stamp, shockwave } from './art/fx.js';
+import { petsFor, petPos, drawPet } from './art/pets.js';
 
 const CH = 8; // chunk size in tiles
 const T_WATER = 3, T_MTN = 4, T_SHALLOW = 5;
@@ -484,8 +485,10 @@ export class Renderer {
     if (!this.rocks) this.buildRocks();
     // rocks are bucketed by row so big maps only scan the visible rows
     for (let ry = Math.max(0, minY); ry <= Math.min(this.h - 1, maxY); ry++) { const row = this.rockRows[ry]; if (row) for (const r of row) if (r.x > minX && r.x < maxX) drawables.push({ d: r.x + r.y, rock: r }); }
+    let nU = 0;
     for (const e of F.ents) {
       if (e.x < minX - 3 || e.x > maxX + 3 || e.y < minY - 3 || e.y > maxY + 3) continue;
+      if (e.k === 0) nU++;
       let d = e.x + e.y;
       if (e.k === 1) {
         const s = e.def ? e.def.size : 1;
@@ -496,6 +499,8 @@ export class Renderer {
       if (e.k === 0 && e.def && e.def.flying) d += 1000;
       drawables.push({ d, e });
     }
+    // ambient pets around settlements (cosmetic, client-side; full detail only)
+    if (z >= 0.85 && nU <= 140 && !F.starts && !F.grid) this.addPets(F, drawables, minX, maxX, minY, maxY);
     drawables.sort((a, b) => a.d - b.d);
     // gather targets in view (resources, farms, wild animals), bucketed by
     // tile: fallback for a gathering worker's tool when the snapshot has no
@@ -532,6 +537,7 @@ export class Renderer {
         continue;
       }
       if (it.corpse) { this.drawCorpse(ctx, it.corpse, t); continue; }
+      if (it.pet) { const [px, py] = iso(it.x, it.y); drawPet(ctx, it.pet, px, py, it.dir, it.mv, t, it.f, it.team); continue; }
       const e = it.e;
       const [sx, sy] = iso(e.x, e.y);
       if (e.k === 2) {
@@ -547,6 +553,7 @@ export class Renderer {
           const f = (t * 0.45 + (e.i || 0) * 0.29) % 1;
           ctx.strokeStyle = `rgba(235,250,255,${0.5 * (1 - f)})`; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.ellipse(sx + Math.sin(e.i || 0) * 8, sy - 2, 3 + f * 14, (3 + f * 14) * 0.45, 0, 0, 7); ctx.stroke();
+          if (!lod) this.drawShoal(ctx, sx, sy, e.i || 0, t);
         } else if (e.t === 'tree' && z > 0.6) {
           // gentle wind sway: skew around the trunk base
           const sw = Math.sin(t * 1.1 + e.x * 0.7 + e.y * 0.4) * 0.035 + Math.sin(t * 2.7 + e.x * 1.9) * 0.012;
@@ -793,6 +800,75 @@ export class Renderer {
       ctx.strokeStyle = '#e8f0ff'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(160,200,255,0.12)';
       ctx.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
       ctx.strokeRect(Math.min(b.x0, b.x1) + 0.5, Math.min(b.y0, b.y1) + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
+    }
+  }
+
+  // pets living at buildings in view and dogs trailing some workers; only
+  // where the tile is currently visible (never reveals fogged ground)
+  addPets(F, drawables, minX, maxX, minY, maxY) {
+    const t = this.time, fog = F.fog, W = this.w, H = this.h, tiles = this.tiles;
+    const cache = this.petCache || (this.petCache = new Map());
+    if (cache.size > 4000) cache.clear();
+    const occ = new Set();
+    const blds = [];
+    for (const it of drawables) {
+      const e = it.e;
+      if (!e || e.k !== 1 || !e.def) continue;
+      if (e.t !== 'farm') { const s = e.def.size, x0 = Math.floor(e.x - s / 2 + 0.01), y0 = Math.floor(e.y - s / 2 + 0.01); for (let yy = y0; yy < y0 + s; yy++) for (let xx = x0; xx < x0 + s; xx++) occ.add(yy * W + xx); }
+      if (e.o >= 0 && !(e.prog > 0 && e.prog < 1) && e.i != null) blds.push(e);
+    }
+    const ok = (x, y, farm) => {
+      const tx = Math.floor(x), ty = Math.floor(y);
+      if (tx < 0 || ty < 0 || tx >= W || ty >= H || x < minX || x > maxX || y < minY || y > maxY) return false;
+      const i = ty * W + tx, tt = tiles[i];
+      if (tt === T_WATER || tt === T_MTN || tt === T_SHALLOW) return false;
+      if (fog && fog[i] !== 2) return false;
+      return farm || !occ.has(i);
+    };
+    for (const e of blds) {
+      const era = this.defs ? this.defs.ages[e.g || 0].era : 'stone';
+      let c = cache.get(e.i);
+      if (!c || c.era !== era) { c = { era, list: petsFor(e.t, e.def.size, era, e.i, e.o) }; cache.set(e.i, c); }
+      for (const p of c.list) {
+        const [dx, dy, mv, dir, f] = petPos(p, t);
+        const x = e.x + p.dx + dx, y = e.y + p.dy + dy;
+        if (!ok(x, y, e.t === 'farm' && p.kind !== 'drone')) continue;
+        drawables.push({ d: x + y, pet: p, x, y, mv, dir, f, team: e.o });
+      }
+    }
+    // a dog (or robot dog) at the heels of some workers
+    for (const it of drawables) {
+      const e = it.e;
+      if (!e || e.k !== 0 || e.o < 0 || !e.def || e.def.class !== 'worker' || e.i == null || e.i % 13 !== 5) continue;
+      const era = e.def.era || 'stone', fut = era === 'future' || era === 'space';
+      let c = cache.get(-1 - e.i);
+      if (!c) { const h = ((e.i * 2654435761) >>> 0) / 4294967296; c = { era, list: [{ kind: fut ? 'robodog' : 'dog', mode: 'sit', dx: 0, dy: 0, r: 0, period: 1, col: fut ? '#dfe6ee' : ['#8a5a30', '#2a2420', '#d8c8a8', '#a87840', '#5a4a3a'][(h * 5) | 0], seed: h * 97 }] }; cache.set(-1 - e.i, c); }
+      const p = c.list[0], fa = e.f || 0, co = Math.cos(fa), si = Math.sin(fa);
+      const x = e.x - co * 0.55 + si * 0.3, y = e.y - si * 0.55 - co * 0.3;
+      if (!ok(x, y, true)) continue;
+      const sd = co - si;
+      drawables.push({ d: x + y, pet: p, x, y, mv: !!e.moving, dir: sd >= 0 ? 1 : -1, f: 0, team: e.o });
+    }
+  }
+
+  // a few fish circling under a fishing spot, and one jumping now and then
+  drawShoal(ctx, sx, sy, id, t) {
+    ctx.fillStyle = 'rgba(20,50,70,0.35)';
+    for (let i = 0; i < 3; i++) {
+      const a = t * (0.7 + i * 0.15) * (id % 2 ? 1 : -1) + i * 2.1 + id;
+      const fx = sx + Math.cos(a) * (7 + i * 2), fy = sy - 1 + Math.sin(a) * (3 + i);
+      const hd = (id % 2 ? 1 : -1) * Math.sin(a) > 0 ? -1 : 1, w = Math.sin(t * 9 + i) * 0.5;
+      ctx.beginPath(); ctx.ellipse(fx, fy, 2.2, 0.8, 0, 0, 7); ctx.moveTo(fx - hd * 2, fy); ctx.lineTo(fx - hd * 3.4, fy - 1 + w); ctx.lineTo(fx - hd * 3.4, fy + 1 + w); ctx.closePath(); ctx.fill();
+    }
+    const j = (t * 0.13 + id * 0.37) % 1;
+    if (j < 0.05) {
+      const k = j / 0.05, jx = sx + Math.sin(id) * 6 - 6 + k * 12, jy = sy - 2 - Math.sin(k * Math.PI) * 9;
+      ctx.save(); ctx.translate(jx, jy); ctx.rotate(-1 + k * 2);
+      ctx.fillStyle = '#b8c8d0'; ctx.beginPath(); ctx.ellipse(0, 0, 2.6, 1, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-2.2, 0); ctx.lineTo(-3.8, -1.2); ctx.lineTo(-3.8, 1.2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillRect(-0.8, -0.8, 2, 0.4);
+      ctx.restore();
+      if (k > 0.85 || k < 0.15) { ctx.strokeStyle = 'rgba(240,250,255,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(k < 0.5 ? sx + Math.sin(id) * 6 - 6 : sx + Math.sin(id) * 6 + 6, sy - 2, 4, 1.6, 0, 0, 7); ctx.stroke(); }
     }
   }
 
